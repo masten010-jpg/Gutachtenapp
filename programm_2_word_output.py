@@ -1,6 +1,6 @@
 # programm_2_word_output.py
 # Aufgabe:
-# - Neueste KI-Antwort-Textdatei mit JSON-Block verarbeiten
+# - Eine KI-Antwort-Textdatei mit JSON-Block verarbeiten
 # - JSON-Daten nachbearbeiten
 # - Word-Vorlage füllen
 # - Pfad zur erzeugten .docx zurückgeben
@@ -143,6 +143,7 @@ def ki_datei_verarbeiten(pfad_ki_txt: str) -> str:
 def neueste_ki_datei_finden() -> str | None:
     """
     Sucht im KI_ANTWORT_ORDNER nach der neuesten *_ki.txt-Datei.
+    (Fallback, falls kein Pfad übergeben wurde)
     """
     if not os.path.isdir(KI_ANTWORT_ORDNER):
         print("KI-Antwort-Ordner existiert nicht.")
@@ -167,18 +168,25 @@ def neueste_ki_datei_finden() -> str | None:
 # MAIN
 # -------------------------
 
-def main() -> str | None:
+def main(pfad_ki_txt: str | None = None) -> str | None:
     """
-    Verarbeitet die NEUESTE *_ki.txt im Ordner 'ki_antworten'
-    und gibt den Pfad zur erzeugten .docx zurück.
+    Wenn pfad_ki_txt angegeben ist, wird GENAU diese KI-Antwort verarbeitet.
+    Wenn nicht, wird die neueste *_ki.txt im Ordner verwendet.
+    Gibt den Pfad der erzeugten .docx zurück.
     """
     os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
     os.makedirs(AUSGANGS_ORDNER, exist_ok=True)
 
-    pfad_ki_txt = neueste_ki_datei_finden()
+    # 1. Pfad festlegen
     if pfad_ki_txt is None:
-        return None
+        pfad_ki_txt = neueste_ki_datei_finden()
+        if pfad_ki_txt is None:
+            return None
 
+    if not os.path.isfile(pfad_ki_txt):
+        raise FileNotFoundError(f"Angegebene KI-Datei existiert nicht: {pfad_ki_txt}")
+
+    # 2. Verarbeiten
     docx_pfad = ki_datei_verarbeiten(pfad_ki_txt)
     return docx_pfad
 
