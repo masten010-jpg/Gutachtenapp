@@ -39,9 +39,13 @@ if st.button("Gutachten verarbeiten (Programm 1 + Programm 2)"):
         st.info(f"PDF gespeichert als: {safe_name}")
 
         try:
-            with st.spinner("Verarbeite Gutachten mit KI..."):
-                programm_1_ki_input.main()
-                programm_2_word_output.main()
+           with st.spinner("Verarbeite Gutachten mit KI..."):
+       pfad_ki = programm_1_ki_input.main()   # gibt Pfad zur *_ki.txt zurück
+    if pfad_ki is None:
+        st.error("Programm 1 hat keine KI-Antwort erzeugt.")
+    else:
+        programm_2_word_output.main(pfad_ki)
+
         except RuntimeError as e:
             # Hier landet z.B. unser "Gemini ClientError: ..."
             st.error(f"Fehler bei der KI-Verarbeitung: {e}")
