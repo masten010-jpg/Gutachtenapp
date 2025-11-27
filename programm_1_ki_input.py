@@ -10,6 +10,7 @@ import os
 import time
 import pdfplumber
 from google import genai
+from google.genai import errors as genai_errors
 
 # -------------------------
 # BASISPFAD & ORDNER
