@@ -11,38 +11,21 @@ import time
 import pdfplumber
 from google import genai
 
-# Versuch: Env-Var, danach ggf. Streamlit-Secrets
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    try:
-        import streamlit as st
-        GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
-    except Exception:
-        GEMINI_API_KEY = None
+# -------------------------
+# BASISPFAD & ORDNER
+# -------------------------
 
-if not GEMINI_API_KEY:
-    raise RuntimeError("GEMINI_API_KEY ist nicht gesetzt. Bitte Env-Var oder Streamlit-Secrets verwenden.")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+EINGANGS_ORDNER = os.path.join(BASE_DIR, "eingang_gutachten")
+KI_ANTWORT_ORDNER = os.path.join(BASE_DIR, "ki_antworten")
 
-GEMINI_MODEL = "gemini-1.5-flash-lite"
+GEMINI_MODEL = "gemini-1.5-flash"
 
-...
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-if not GEMINI_API_KEY:
-    raise RuntimeError("GEMINI_API_KEY ist nicht gesetzt. Bitte Umgebungsvariable setzen.")
-
-# Direkt Client mit API-Key bauen (oder du lässt api_key weg, wenn du nur über Env gehst)
-client = genai.Client(api_key=GEMINI_API_KEY)
-
-
-# Wie viele Zeichen aus dem Gutachten maximal an die KI gehen
-MAX_TEXT_CHARS = 7000
-
-# Mehrere Versuche bei Fehlern
+# Konfiguration
+MAX_TEXT_CHARS = 8000       # mehr Kontext für Unfallhergang etc.
 KI_MAX_RETRIES = 3
-KI_TIMEOUT_SEKUNDEN = 60  # wird im SDK intern gehandhabt, wir nutzen es nur für Retry-Delays
+KI_TIMEOUT_SEKUNDEN = 60    # aktuell nur für Logging / Retry genutzt
 
 
 PROMPT_TEMPLATE = """
@@ -56,6 +39,27 @@ WICHTIG:
 - Nutze den Original-Wortlaut aus dem Gutachten (z.B. Straßennamen, Ortsnamen).
 - Antworte ausschließlich auf DEUTSCH.
 - Halte dich EXAKT an die vorgegebenen Feldnamen und an das Ausgabeschema.
+
+BESONDERS WICHTIGE FELDER (NICHT LEER LASSEN, WENN IM TEXT IRGENDWO ERWÄHNT):
+
+1. UNFALL_DATUM / UNFALL_UHRZEIT:
+   - Suche nach Formulierungen wie: "am 17.02.2025", "am 17.02.2025 gegen 14:30 Uhr", "Unfallzeit", "Unfalltag".
+   - Gib das Datum im Format "TT.MM.JJJJ" zurück (z.B. "17.02.2025").
+   - Gib die Uhrzeit im Format "HH:MM" zurück (z.B. "14:30").
+
+2. UNFALLORT / UNFALL_STRASSE:
+   - Suche nach Formulierungen wie: "im Bereich", "in Höhe von", "auf der Straße", "an der Kreuzung", "Unfallort".
+   - UNFALLORT ist typischerweise "Stadt / Ort", UNFALL_STRASSE ist typischerweise "Straßenname + Hausnummer / Kreuzung".
+
+3. POLIZEIAKTE_NUMMER:
+   - Suche nach Angaben wie "Aktenzeichen", "Polizeivorgangsnummer", "Vorgangsnummer", "Geschäftszeichen" im Zusammenhang mit Polizei.
+   - Wenn du eine solche Nummer findest, trage sie in POLIZEIAKTE_NUMMER ein.
+   - Wenn es mehrere Aktenzeichen gibt, nimm dasjenige, das eindeutig zur Polizei passt.
+
+4. UNFALLHERGANG:
+   - Suche nach Abschnitten, die den Ablauf des Unfalls beschreiben ("Unfallhergang", "Sachverhalt", "zum Hergang", "es ereignete sich folgender Unfall").
+   - Fasse den beschriebenen Unfallhergang in 2–4 SÄTZEN kurz zusammen.
+   - Verwende NUR Informationen, die im Text stehen, keine eigenen Ergänzungen.
 
 AUSGABEFORMAT:
 
@@ -77,8 +81,6 @@ AUSGABEFORMAT:
    Fahrzeug Kennzeichen: ...
 
    Polizei Aktennummer (VG/.../...): ...
-   SACHVERHALT: ... (In Sätzen kurze zusammenfassung Gesehen für Anwalt Email)
-   14tage vom erstellg Datum: ... (14tage in zukunft laut datum der ki anfrage überprüfe kalender!)
 
    Wie ereignete sich der Unfall: ...
    Reparaturkosten: ...
@@ -108,12 +110,11 @@ JSON_START
   "UNFALL_UHRZEIT": "",
   "UNFALLORT": "",
   "UNFALL_STRASSE": "",
-  "14tage von erstellg Datum",
 
   "FAHRZEUGTYP": "",
   "KENNZEICHEN": "",
   "FAHRZEUG_KENNZEICHEN": "",
-  "SACHVERHALT",
+
   "POLIZEIAKTE_NUMMER": "",
 
   "UNFALLHERGANG": "",
@@ -132,6 +133,34 @@ HIER IST DAS GUTACHTEN (nur ein Ausschnitt, aber benutze so viele Infos wie mög
 """
 
 
+# -------------------------
+# Hilfsfunktionen
+# -------------------------
+
+def get_gemini_client():
+    """
+    Holt den Gemini-API-Key aus Umgebungsvariablen oder Streamlit-Secrets
+    und baut einen Client. Wird NUR aufgerufen, wenn wirklich ein Request
+    gesendet werden soll (kein Fehler beim Import).
+    """
+    api_key = os.getenv("GEMINI_API_KEY")
+
+    if not api_key:
+        try:
+            import streamlit as st
+            api_key = st.secrets.get("GEMINI_API_KEY")
+        except Exception:
+            api_key = None
+
+    if not api_key:
+        raise RuntimeError(
+            "GEMINI_API_KEY ist nicht gesetzt. "
+            "Bitte als Umgebungsvariable oder in Streamlit-Secrets hinterlegen."
+        )
+
+    return genai.Client(api_key=api_key)
+
+
 def pdf_text_auslesen(pfad):
     """Liest den Text aus einer PDF-Datei (alle Seiten)."""
     seiten_text = []
@@ -146,12 +175,12 @@ def prompt_bauen(gutachten_text):
     return PROMPT_TEMPLATE.replace("{GUTACHTEN_TEXT}", gutachten_text)
 
 
-def ki_aufrufen(prompt_text):
+def ki_aufrufen(prompt_text: str) -> str:
     """
     Schickt den Prompt an die Google-Gemini-API (über das offizielle SDK) und gibt die Antwort zurück.
-    - Mehrere Versuche bei Fehlern
-    - Temperatur = 0 (keine Kreativität, nur nüchterne Antwort)
     """
+    client = get_gemini_client()
+
     for versuch in range(1, KI_MAX_RETRIES + 1):
         print(
             f"[DEBUG] Sende Request an Gemini (SDK) – Versuch {versuch}/{KI_MAX_RETRIES}"
@@ -165,7 +194,6 @@ def ki_aufrufen(prompt_text):
                 },
             )
 
-            # Das SDK baut dir den Text schon zusammen
             text = response.text
             print("[DEBUG] KI-Antwort erfolgreich empfangen.")
             return text
@@ -217,7 +245,12 @@ def neueste_pdf_finden(ordner):
     return neueste
 
 
+# -------------------------
+# MAIN
+# -------------------------
+
 def main():
+    # Ordner sicherstellen
     os.makedirs(EINGANGS_ORDNER, exist_ok=True)
     os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
 
@@ -232,11 +265,9 @@ def main():
 
     print(f"Neueste PDF gefunden: {neueste_pdf}")
 
-    # Vollständigen Text lesen
     voller_text = pdf_text_auslesen(neueste_pdf)
     print("[DEBUG] Länge des vollen Gutachten-Textes:", len(voller_text), "Zeichen")
 
-    # Text begrenzen (nur Anfangsbereich, da dort Mandant/Unfalldaten typischerweise stehen)
     gutachten_text = voller_text
     if len(gutachten_text) > MAX_TEXT_CHARS:
         print(f"[DEBUG] Kürze Text auf die ersten {MAX_TEXT_CHARS} Zeichen.")
@@ -244,18 +275,15 @@ def main():
 
     prompt = prompt_bauen(gutachten_text)
     print("[DEBUG] Prompt-Länge:", len(prompt), "Zeichen")
-    print("Sende Gutachten an Gemini... nicht abbrechen, bis Antwort kommt.")
+    print("Sende Gutachten an Gemini...")
 
     ki_antwort = ki_aufrufen(prompt)
 
     basisname = os.path.splitext(os.path.basename(neueste_pdf))[0]
     ki_antwort_speichern(basisname, ki_antwort)
 
-    print("Programm 1 fertig. Starte jetzt Programm 2 (Word-Ausgabe)...")
+    print("Fertig. Diese eine PDF wurde verarbeitet.")
 
-    # Programm 2 starten: verarbeitet alle *_ki.txt in ki_antworten
-    programm_2_word_output.main()
 
-    print("Alles erledigt: KI-Auswertung + Word-Schreiben erstellt.")
 if __name__ == "__main__":
     main()
