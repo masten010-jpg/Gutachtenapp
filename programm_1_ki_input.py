@@ -2,9 +2,9 @@
 # Aufgabe:
 # - Neueste PDF in "eingang_gutachten" finden
 # - Text auslesen
-# - Text begrenzen
-# - Klaren Extraktions-Prompt an die KI schicken (Google Gemini)
+# - Klaren Extraktions-Prompt an Google Gemini schicken
 # - Antwort als *_ki.txt in "ki_antworten" speichern
+# - Pfad zur gespeicherten *_ki.txt zurückgeben
 
 import os
 import time
@@ -21,12 +21,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EINGANGS_ORDNER = os.path.join(BASE_DIR, "eingang_gutachten")
 KI_ANTWORT_ORDNER = os.path.join(BASE_DIR, "ki_antworten")
 
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-1.5-flash"
 
-# Konfiguration
-MAX_TEXT_CHARS = 8000       # mehr Kontext für Unfallhergang etc.
+MAX_TEXT_CHARS = 8000
 KI_MAX_RETRIES = 3
-KI_TIMEOUT_SEKUNDEN = 60    # aktuell nur für Logging / Retry genutzt
+KI_TIMEOUT_SEKUNDEN = 60  # nur für Logs
 
 
 PROMPT_TEMPLATE = """
@@ -55,12 +54,10 @@ BESONDERS WICHTIGE FELDER (NICHT LEER LASSEN, WENN IM TEXT IRGENDWO ERWÄHNT):
 3. POLIZEIAKTE_NUMMER:
    - Suche nach Angaben wie "Aktenzeichen", "Polizeivorgangsnummer", "Vorgangsnummer", "Geschäftszeichen" im Zusammenhang mit Polizei.
    - Wenn du eine solche Nummer findest, trage sie in POLIZEIAKTE_NUMMER ein.
-   - Wenn es mehrere Aktenzeichen gibt, nimm dasjenige, das eindeutig zur Polizei passt.
 
 4. UNFALLHERGANG:
    - Suche nach Abschnitten, die den Ablauf des Unfalls beschreiben ("Unfallhergang", "Sachverhalt", "zum Hergang", "es ereignete sich folgender Unfall").
    - Fasse den beschriebenen Unfallhergang in 2–4 SÄTZEN kurz zusammen.
-   - Verwende NUR Informationen, die im Text stehen, keine eigenen Ergänzungen.
 
 AUSGABEFORMAT:
 
@@ -134,16 +131,8 @@ HIER IST DAS GUTACHTEN (nur ein Ausschnitt, aber benutze so viele Infos wie mög
 """
 
 
-# -------------------------
-# Hilfsfunktionen
-# -------------------------
-
 def get_gemini_client():
-    """
-    Holt den Gemini-API-Key aus Umgebungsvariablen oder Streamlit-Secrets
-    und baut einen Client. Wird NUR aufgerufen, wenn wirklich ein Request
-    gesendet werden soll (kein Fehler beim Import).
-    """
+    """API-Key aus Env oder Streamlit-Secrets holen und Client bauen."""
     api_key = os.getenv("GEMINI_API_KEY")
 
     if not api_key:
@@ -162,8 +151,7 @@ def get_gemini_client():
     return genai.Client(api_key=api_key)
 
 
-def pdf_text_auslesen(pfad):
-    """Liest den Text aus einer PDF-Datei (alle Seiten)."""
+def pdf_text_auslesen(pfad: str) -> str:
     seiten_text = []
     with pdfplumber.open(pfad) as pdf:
         for seite in pdf.pages:
@@ -171,57 +159,42 @@ def pdf_text_auslesen(pfad):
     return "\n".join(seiten_text)
 
 
-def prompt_bauen(gutachten_text):
-    """Setzt den Gutachtentext in das Prompt-Template ein."""
+def prompt_bauen(gutachten_text: str) -> str:
     return PROMPT_TEMPLATE.replace("{GUTACHTEN_TEXT}", gutachten_text)
 
 
 def ki_aufrufen(prompt_text: str) -> str:
-    """
-    Schickt den Prompt an die Google-Gemini-API (über das offizielle SDK) und gibt die Antwort zurück.
-    """
     client = get_gemini_client()
 
     for versuch in range(1, KI_MAX_RETRIES + 1):
-        print(
-            f"[DEBUG] Sende Request an Gemini (SDK) – Versuch {versuch}/{KI_MAX_RETRIES}"
-        )
+        print(f"[DEBUG] Sende Request an Gemini – Versuch {versuch}/{KI_MAX_RETRIES}")
         try:
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=prompt_text,
-                config={
-                    "temperature": 0.0,
-                },
+                config={"temperature": 0.0},
             )
-
             text = response.text
             print("[DEBUG] KI-Antwort erfolgreich empfangen.")
             return text
 
         except genai_errors.ClientError as e:
-            # Hier ist die eigentliche Fehlermeldung von Gemini
             msg = f"Gemini ClientError: {e}"
             print(msg)
-
-            # Typische Fälle, bei denen Retry nichts bringt
             if versuch == KI_MAX_RETRIES:
                 raise RuntimeError(msg) from e
-
             print("Warte 5 Sekunden und versuche es erneut...")
             time.sleep(5)
 
         except Exception as e:
-            print("Allgemeiner Fehler beim Aufruf von Gemini (SDK):", e)
+            print("Allgemeiner Fehler beim Aufruf von Gemini:", e)
             if versuch == KI_MAX_RETRIES:
                 raise
             print("Warte 5 Sekunden und versuche es erneut...")
             time.sleep(5)
 
 
-
-def ki_antwort_speichern(basisname, ki_text):
-    """Speichert die KI-Antwort als .txt-Datei in KI_ANTWORT_ORDNER und gibt den Pfad zurück."""
+def ki_antwort_speichern(basisname: str, ki_text: str) -> str:
     os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
     ziel_pfad = os.path.join(KI_ANTWORT_ORDNER, basisname + "_ki.txt")
     with open(ziel_pfad, "w", encoding="utf-8") as f:
@@ -230,12 +203,7 @@ def ki_antwort_speichern(basisname, ki_text):
     return ziel_pfad
 
 
-
-def neueste_pdf_finden(ordner):
-    """
-    Sucht im Ordner nach allen .pdf-Dateien und gibt die neueste zurück.
-    Gibt zusätzlich Debug-Ausgaben aus.
-    """
+def neueste_pdf_finden(ordner: str) -> str | None:
     print(f"[DEBUG] Absoluter Ordnerpfad: {ordner}")
     if not os.path.isdir(ordner):
         print("[DEBUG] Ordner existiert NICHT!")
@@ -260,12 +228,7 @@ def neueste_pdf_finden(ordner):
     return neueste
 
 
-# -------------------------
-# MAIN
-# -------------------------
-
-def main():
-    # Ordner sicherstellen
+def main() -> str | None:
     os.makedirs(EINGANGS_ORDNER, exist_ok=True)
     os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
 
@@ -275,7 +238,7 @@ def main():
     neueste_pdf = neueste_pdf_finden(EINGANGS_ORDNER)
 
     if neueste_pdf is None:
-        print("Keine PDF-Datei im Ordner gefunden. Lege zuerst ein Gutachten (PDF) hinein.")
+        print("Keine PDF-Datei im Ordner gefunden.")
         return None
 
     print(f"Neueste PDF gefunden: {neueste_pdf}")
@@ -299,7 +262,6 @@ def main():
 
     print("Fertig. Diese eine PDF wurde verarbeitet.")
     return pfad_ki
-
 
 
 if __name__ == "__main__":
