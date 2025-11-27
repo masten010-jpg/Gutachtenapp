@@ -136,10 +136,27 @@ def ki_datei_verarbeiten(pfad_ki_txt: str):
 # MAIN
 # -------------------------
 
-def main():
+def main(pfad_ki_txt=None):
+    """
+    Wenn pfad_ki_txt angegeben ist, wird NUR diese eine KI-Antwort verarbeitet.
+    Wenn nicht, werden wie bisher alle *_ki.txt im Ordner verarbeitet.
+    """
     os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
     os.makedirs(AUSGANGS_ORDNER, exist_ok=True)
 
+    # Fall 1: App hat eine konkrete KI-Datei übergeben
+    if pfad_ki_txt is not None:
+        if not os.path.isfile(pfad_ki_txt):
+            print(f"Angegebene KI-Datei existiert nicht: {pfad_ki_txt}")
+            return
+
+        try:
+            ki_datei_verarbeiten(pfad_ki_txt)
+        except Exception as e:
+            print(f"FEHLER bei {pfad_ki_txt}: {e}")
+        return
+
+    # Fall 2: Standard – alle *_ki.txt im Ordner verarbeiten
     print("Suche KI-Antworten in:", KI_ANTWORT_ORDNER)
     dateien = os.listdir(KI_ANTWORT_ORDNER)
     ki_files = [d for d in dateien if d.endswith("_ki.txt")]
@@ -149,14 +166,16 @@ def main():
         return
 
     for datei in ki_files:
-        pfad_ki_txt = os.path.join(KI_ANTWORT_ORDNER, datei)
+        pfad = os.path.join(KI_ANTWORT_ORDNER, datei)
         try:
-            ki_datei_verarbeiten(pfad_ki_txt)
+            ki_datei_verarbeiten(pfad)
         except Exception as e:
-            print(f"FEHLER bei {pfad_ki_txt}: {e}")
+            print(f"FEHLER bei {pfad}: {e}")
 
     print("Alle KI-Antworten verarbeitet.")
 
 
+
 if __name__ == "__main__":
     main()
+
