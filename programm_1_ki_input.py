@@ -199,13 +199,25 @@ def ki_aufrufen(prompt_text: str) -> str:
             print("[DEBUG] KI-Antwort erfolgreich empfangen.")
             return text
 
+        except genai_errors.ClientError as e:
+            # Hier ist die eigentliche Fehlermeldung von Gemini
+            msg = f"Gemini ClientError: {e}"
+            print(msg)
+
+            # Typische Fälle, bei denen Retry nichts bringt
+            if versuch == KI_MAX_RETRIES:
+                raise RuntimeError(msg) from e
+
+            print("Warte 5 Sekunden und versuche es erneut...")
+            time.sleep(5)
+
         except Exception as e:
-            print("FEHLER beim Aufruf von Gemini (SDK):", e)
-            if versuch < KI_MAX_RETRIES:
-                print("Warte 5 Sekunden und versuche es erneut...")
-                time.sleep(5)
-            else:
+            print("Allgemeiner Fehler beim Aufruf von Gemini (SDK):", e)
+            if versuch == KI_MAX_RETRIES:
                 raise
+            print("Warte 5 Sekunden und versuche es erneut...")
+            time.sleep(5)
+
 
 
 def ki_antwort_speichern(basisname, ki_text):
