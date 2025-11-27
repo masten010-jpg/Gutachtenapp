@@ -221,12 +221,14 @@ def ki_aufrufen(prompt_text: str) -> str:
 
 
 def ki_antwort_speichern(basisname, ki_text):
-    """Speichert die KI-Antwort als .txt-Datei in KI_ANTWORT_ORDNER."""
+    """Speichert die KI-Antwort als .txt-Datei in KI_ANTWORT_ORDNER und gibt den Pfad zurück."""
     os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
     ziel_pfad = os.path.join(KI_ANTWORT_ORDNER, basisname + "_ki.txt")
     with open(ziel_pfad, "w", encoding="utf-8") as f:
         f.write(ki_text)
     print(f"KI-Antwort gespeichert: {ziel_pfad}")
+    return ziel_pfad
+
 
 
 def neueste_pdf_finden(ordner):
@@ -274,7 +276,7 @@ def main():
 
     if neueste_pdf is None:
         print("Keine PDF-Datei im Ordner gefunden. Lege zuerst ein Gutachten (PDF) hinein.")
-        return
+        return None
 
     print(f"Neueste PDF gefunden: {neueste_pdf}")
 
@@ -293,9 +295,11 @@ def main():
     ki_antwort = ki_aufrufen(prompt)
 
     basisname = os.path.splitext(os.path.basename(neueste_pdf))[0]
-    ki_antwort_speichern(basisname, ki_antwort)
+    pfad_ki = ki_antwort_speichern(basisname, ki_antwort)
 
     print("Fertig. Diese eine PDF wurde verarbeitet.")
+    return pfad_ki
+
 
 
 if __name__ == "__main__":
