@@ -29,7 +29,6 @@ if st.button("Gutachten verarbeiten (Programm 1 + Programm 2)"):
     if uploaded_file is None:
         st.error("Bitte zuerst eine PDF-Datei hochladen.")
     else:
-        # PDF in den Eingangsordner speichern (mit Zeitstempel, damit es eindeutig ist)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_name = f"gutachten_{timestamp}.pdf"
         pdf_path = os.path.join(EINGANGS_ORDNER, safe_name)
@@ -38,13 +37,19 @@ if st.button("Gutachten verarbeiten (Programm 1 + Programm 2)"):
             f.write(uploaded_file.getbuffer())
 
         st.info(f"PDF gespeichert als: {safe_name}")
-        with st.spinner("Verarbeite Gutachten mit KI..."):
-            # Programm 1: PDF → KI → *_ki.txt in ki_antworten
-            programm_1_ki_input.main()
-            # Programm 2: *_ki.txt → Word-Dokument in ausgang_schreiben
-            programm_2_word_output.main()
 
-        st.success("Verarbeitung abgeschlossen. Das Schreiben kann jetzt heruntergeladen werden.")
+        try:
+            with st.spinner("Verarbeite Gutachten mit KI..."):
+                programm_1_ki_input.main()
+                programm_2_word_output.main()
+        except RuntimeError as e:
+            # Hier landet z.B. unser "Gemini ClientError: ..."
+            st.error(f"Fehler bei der KI-Verarbeitung: {e}")
+        except Exception as e:
+            st.error(f"Unerwarteter Fehler: {e}")
+        else:
+            st.success("Verarbeitung abgeschlossen. Das Schreiben kann jetzt heruntergeladen werden.")
+
 
 # 2) Download der neuesten Word-Datei
 st.header("2. Letztes Anwaltsschreiben herunterladen")
