@@ -18,12 +18,14 @@ st.set_page_config(page_title="Kfz-Gutachten → Anwaltsschreiben", layout="cent
 
 st.title("Kfz-Gutachten Automatisierung")
 st.write(
-    "PDF-Gutachten hochladen, von der KI auswerten lassen und fertiges Anwaltsschreiben "
-    "als Word-Datei erhalten."
+    "PDF-Gutachten hochladen, von der KI auswerten lassen und fertiges "
+    "Anwaltsschreiben als Word-Datei erhalten."
 )
 
-
+# --------------------------------------------------
 # 1) Upload + Verarbeiten
+# --------------------------------------------------
+
 st.header("1. Gutachten hochladen und verarbeiten")
 
 uploaded_file = st.file_uploader("Gutachten als PDF hochladen", type=["pdf"])
@@ -48,24 +50,32 @@ if st.button("Gutachten verarbeiten (Programm 1 + Programm 2)"):
                 pfad_ki = programm_1_ki_input.main()
 
                 if pfad_ki is None:
-                    st.error(
-                        "Programm 1 hat keine KI-Antwort erzeugt. "
-                        "Bitte Log-Ausgabe prüfen."
+                    raise RuntimeError(
+                        "Programm 1 hat keine KI-Antwort erzeugt "
+                        "(keine PDF gefunden oder KI-Fehler)."
                     )
-                else:
-                    # Programm 2: *_ki.txt → Word-Dokument
-                    programm_2_word_output.main(pfad_ki)
-        except RuntimeError as e:
-            st.error(f"Fehler bei der KI-Verarbeitung: {e}")
-        except Exception as e:
-            st.error(f"Unerwarteter Fehler: {e}")
-        else:
+
+                # Programm 2: *_ki.txt → Word-Dokument, gibt Pfad zur .docx zurück
+                docx_pfad = programm_2_word_output.main(pfad_ki)
+
+                if docx_pfad is None or not os.path.isfile(docx_pfad):
+                    raise RuntimeError(
+                        "Programm 2 hat kein Schreiben erzeugt."
+                    )
+
             st.success(
-                "Verarbeitung abgeschlossen. Das Schreiben kann jetzt heruntergeladen werden."
+                "Verarbeitung abgeschlossen. Das Schreiben kann jetzt "
+                "unter Punkt 2 heruntergeladen werden."
             )
 
+        except Exception as e:
+            st.error(f"Fehler bei der Verarbeitung: {e}")
 
+
+# --------------------------------------------------
 # 2) Download der neuesten Word-Datei
+# --------------------------------------------------
+
 st.header("2. Letztes Anwaltsschreiben herunterladen")
 
 
@@ -75,14 +85,22 @@ def finde_neueste_docx(ordner: str):
     dateien = [
         os.path.join(ordner, d)
         for d in os.listdir(ordner)
-        if d.lower().endswith(".docx")
+        if d.lower().ends_with(".docx")
     ]
     if not dateien:
         return None
     return max(dateien, key=os.path.getmtime)
 
 
-neueste_docx = finde_neueste_docx(AUSGANGS_ORDNER)
+neueste_docx = None
+if os.path.isdir(AUSGANGS_ORDNER):
+    files = [
+        os.path.join(AUSGANGS_ORDNER, d)
+        for d in os.listdir(AUSGANGS_ORDNER)
+        if d.lower().endswith(".docx")
+    ]
+    if files:
+        neueste_docx = max(files, key=os.path.getmtime)
 
 if neueste_docx:
     st.write(f"Aktuellste Datei: **{os.path.basename(neueste_docx)}**")
@@ -98,3 +116,24 @@ if neueste_docx:
         )
 else:
     st.info("Noch keine Word-Datei erzeugt. Bitte zuerst ein Gutachten verarbeiten.")
+
+
+# --------------------------------------------------
+# 3) Debug-Infos (optional, aber sehr hilfreich)
+# --------------------------------------------------
+
+with st.expander("Debug: Dateien im System anzeigen"):
+    ki_ordner = os.path.join(BASE_DIR, "ki_antworten")
+    out_ordner = AUSGANGS_ORDNER
+
+    st.subheader("KI-Antworten (ki_antworten)")
+    if os.path.isdir(ki_ordner):
+        st.write(os.listdir(ki_ordner))
+    else:
+        st.write("Ordner existiert nicht.")
+
+    st.subheader("Ausgang-Schreiben (ausgang_schreiben)")
+    if os.path.isdir(out_ordner):
+        st.write(os.listdir(out_ordner))
+    else:
+        st.write("Ordner existiert nicht.")
