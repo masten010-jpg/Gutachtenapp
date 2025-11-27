@@ -1,0 +1,5 @@
+streamlit
+pdfplumber
+docxtpl
+google-genai
+requests
