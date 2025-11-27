@@ -1,6 +1,6 @@
 # programm_2_word_output.py
 # Aufgabe:
-# - Eine KI-Antwort-Textdatei mit JSON-Block verarbeiten
+# - Neueste KI-Antwort-Textdatei mit JSON-Block verarbeiten
 # - JSON-Daten nachbearbeiten
 # - Word-Vorlage füllen
 # - Pfad zur erzeugten .docx zurückgeben
@@ -140,40 +140,47 @@ def ki_datei_verarbeiten(pfad_ki_txt: str) -> str:
     return ausgabe_pfad
 
 
+def neueste_ki_datei_finden() -> str | None:
+    """
+    Sucht im KI_ANTWORT_ORDNER nach der neuesten *_ki.txt-Datei.
+    """
+    if not os.path.isdir(KI_ANTWORT_ORDNER):
+        print("KI-Antwort-Ordner existiert nicht.")
+        return None
+
+    dateien = [
+        os.path.join(KI_ANTWORT_ORDNER, d)
+        for d in os.listdir(KI_ANTWORT_ORDNER)
+        if d.endswith("_ki.txt")
+    ]
+
+    if not dateien:
+        print("Keine *_ki.txt-Dateien gefunden.")
+        return None
+
+    neueste = max(dateien, key=os.path.getmtime)
+    print(f"Neueste KI-Datei: {neueste}")
+    return neueste
+
+
 # -------------------------
 # MAIN
 # -------------------------
 
-def main(pfad_ki_txt: str | None = None) -> str | None:
+def main() -> str | None:
     """
-    Wenn pfad_ki_txt angegeben ist, wird NUR diese eine KI-Antwort verarbeitet.
-    Wenn nicht, werden alle *_ki.txt im Ordner verarbeitet.
-    Gibt den Pfad der zuletzt erzeugten .docx zurück.
+    Verarbeitet die NEUESTE *_ki.txt im Ordner 'ki_antworten'
+    und gibt den Pfad zur erzeugten .docx zurück.
     """
     os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
     os.makedirs(AUSGANGS_ORDNER, exist_ok=True)
 
-    if pfad_ki_txt is not None:
-        if not os.path.isfile(pfad_ki_txt):
-            raise FileNotFoundError(f"Angegebene KI-Datei existiert nicht: {pfad_ki_txt}")
-        return ki_datei_verarbeiten(pfad_ki_txt)
-
-    # Fallback: alle Dateien verarbeiten
-    print("Suche KI-Antworten in:", KI_ANTWORT_ORDNER)
-    dateien = os.listdir(KI_ANTWORT_ORDNER)
-    ki_files = [d for d in dateien if d.endswith("_ki.txt")]
-
-    if not ki_files:
-        print("Keine *_ki.txt-Dateien gefunden.")
+    pfad_ki_txt = neueste_ki_datei_finden()
+    if pfad_ki_txt is None:
         return None
 
-    letzte_docx = None
-    for datei in ki_files:
-        pfad = os.path.join(KI_ANTWORT_ORDNER, datei)
-        letzte_docx = ki_datei_verarbeiten(pfad)
-
-    print("Alle KI-Antworten verarbeitet.")
-    return letzte_docx
+    docx_pfad = ki_datei_verarbeiten(pfad_ki_txt)
+    return docx_pfad
 
 
 if __name__ == "__main__":
