@@ -115,6 +115,11 @@ AUSGABEFORMAT:
    - Innerhalb dieser Marker nur gültiges JSON, KEINE Kommentare, KEINE Erklärung.
    - Strings immer in Anführungszeichen.
    - Verwende GENAU die folgenden Keys (nicht mehr, nicht weniger).
+   WICHTIGER HINWEIS:
+- Achte besonders darauf, dass das Feld "SCHADENSNUMMER" ausgefüllt wird,
+  wenn irgendwo im Gutachten eine Versicherungsnummer / VS-Nr / Schaden-Nr o.ä. genannt ist.
+- Wenn eine solche Nummer vorhanden ist, darf "SCHADENSNUMMER" NICHT leer bleiben.
+
 
 JSON-FORMAT (verwende GENAU diese Keys):
 
