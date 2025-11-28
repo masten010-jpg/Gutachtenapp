@@ -51,16 +51,29 @@ def json_aus_ki_antwort_parsen(ki_text: str) -> dict:
     return daten
 
 
+import re
+
 def euro_zu_float(text: str) -> float:
     if not text:
         return 0.0
+
     t = text.strip()
-    t = t.replace("€", "").replace("EUR", "").strip()
-    t = t.replace(".", "").replace(",", ".")
+    # Erste Zahl im Text finden (inkl. Tausenderpunkt und Komma)
+    match = re.search(r'-?[\d\.\,]+', t)
+    if not match:
+        return 0.0
+
+    number_str = match.group(0)
+
+    # Tausenderpunkte entfernen, Komma in Punkt umwandeln
+    number_str = number_str.replace("€", "").replace("EUR", "").strip()
+    number_str = number_str.replace(".", "").replace(",", ".")
+
     try:
-        return float(t)
+        return float(number_str)
     except ValueError:
         return 0.0
+
 
 
 def float_zu_euro(betrag: float) -> str:
@@ -225,3 +238,4 @@ def main(pfad_ki_txt: str | None = None) -> str | None:
 
 if __name__ == "__main__":
     main()
+
