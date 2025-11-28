@@ -137,7 +137,12 @@ def daten_nachbearbeiten(daten: dict) -> dict:
     ]
     for feld in text_felder_mit_fallback:
         if not (daten.get(feld) or "").strip():
-            daten[feld] = "nicht bekannt"
+            if feld == "SCHADENSNUMMER":
+                # Spezieller Fallback für Schadensnummer
+                daten[feld] = 'Versicherungsnummer ("VS_Nr" tages)'
+            else:
+                daten[feld] = "nicht bekannt"
+
 
     if not (daten.get("FAHRZEUG_KENNZEICHEN") or "").strip():
         daten["FAHRZEUG_KENNZEICHEN"] = daten.get("KENNZEICHEN", "nicht bekannt")
@@ -238,4 +243,5 @@ def main(pfad_ki_txt: str | None = None) -> str | None:
 
 if __name__ == "__main__":
     main()
+
 
