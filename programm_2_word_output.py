@@ -93,35 +93,48 @@ def baue_standard_schadenhergang(daten: dict) -> str:
 
 
 def daten_nachbearbeiten(daten: dict) -> dict:
-    # SCHADENSNUMMER sicherstellen (falls KI-Feld fehlt oder leer ist)
+    # Wichtige Keys sicherstellen
     daten.setdefault("SCHADENSNUMMER", "")
-
-    # SCHADENHERGANG-Feld sicherstellen
     daten.setdefault("SCHADENHERGANG", "")
+    daten.setdefault("AKTENZEICHEN", "")
+    daten.setdefault("HEUTDATUM", "")
 
     # Wichtige Unfall-Felder nicht blank lassen: Fallback "nicht bekannt"
     for feld in ["UNFALL_DATUM", "UNFALL_UHRZEIT", "UNFALLORT", "UNFALL_STRASSE"]:
         if not daten.get(feld):
             daten[feld] = "nicht bekannt"
 
-    # Falls FAHRZEUG_KENNZEICHEN nicht gesetzt ist, fallback auf KENNZEICHEN
+    # FAHRZEUG_KENNZEICHEN: Fallback auf KENNZEICHEN
     if not daten.get("FAHRZEUG_KENNZEICHEN"):
         daten["FAHRZEUG_KENNZEICHEN"] = daten.get("KENNZEICHEN", "")
 
-    # KOSTENSUMME_X berechnen, falls leer
-    if not daten.get("KOSTENSUMME_X"):
-        rep = euro_zu_float(daten.get("REPARATURKOSTEN", ""))
-        wm = euro_zu_float(daten.get("WERTMINDERUNG", ""))
-        pausch = euro_zu_float(daten.get("KOSTENPAUSCHALE", ""))
-        gut = euro_zu_float(daten.get("GUTACHTERKOSTEN", ""))
+    # Geld-Felder normalisieren und sicherstellen, dass nie komplett leer sind
+    geld_felder = ["REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN"]
+    geld_werte = {}
 
-        gesamt = rep + wm + pausch + gut
-        daten["KOSTENSUMME_X"] = float_zu_euro(gesamt)
+    for feld in geld_felder:
+        roh = (daten.get(feld) or "").strip()
+        betrag = euro_zu_float(roh)
+        # Immer ein sauber formatiertes Eurofeld schreiben
+        daten[feld] = float_zu_euro(betrag)
+        geld_werte[feld] = betrag
 
-    # FRIST_DATUM = heute + 14 Tage (falls nicht von der KI gesetzt)
-    if not daten.get("FRIST_DATUM"):
-        frist = datetime.now() + timedelta(days=14)
-        daten["FRIST_DATUM"] = frist.strftime("%d.%m.%Y")
+    # KOSTENSUMME_X immer aus den vier Geldfeldern berechnen
+    gesamt = (
+        geld_werte["REPARATURKOSTEN"]
+        + geld_werte["WERTMINDERUNG"]
+        + geld_werte["KOSTENPAUSCHALE"]
+        + geld_werte["GUTACHTERKOSTEN"]
+    )
+    daten["KOSTENSUMME_X"] = float_zu_euro(gesamt)
+
+    # FRIST_DATUM = heute + 14 Tage
+    frist = datetime.now() + timedelta(days=14)
+    daten["FRIST_DATUM"] = frist.strftime("%d.%m.%Y")
+
+    # HEUTDATUM = heutiges Datum (Upload/Verarbeitung)
+    heute = datetime.now()
+    daten["HEUTDATUM"] = heute.strftime("%d.%m.%Y")
 
     # SCHADENHERGANG: nur Fallback, wenn komplett leer
     sh = (daten.get("SCHADENHERGANG") or "").strip()
