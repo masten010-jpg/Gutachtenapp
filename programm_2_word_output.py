@@ -134,6 +134,9 @@ def daten_nachbearbeiten(daten: dict) -> dict:
     gesamt = sum(geld_werte.values())
     daten["KOSTENSUMME_X"] = float_zu_euro(gesamt)
 
+    # Alias für Word: Gesamtsumme
+    daten["GESAMTSUMME"] = daten["KOSTENSUMME_X"]
+
     # FRIST_DATUM = heute + 14 Tage
     frist = datetime.now() + timedelta(days=14)
     daten["FRIST_DATUM"] = frist.strftime("%d.%m.%Y")
