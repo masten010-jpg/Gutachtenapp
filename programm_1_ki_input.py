@@ -21,11 +21,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EINGANGS_ORDNER = os.path.join(BASE_DIR, "eingang_gutachten")
 KI_ANTWORT_ORDNER = os.path.join(BASE_DIR, "ki_antworten")
 
-GEMINI_MODEL = "gemini-2.5-flash"
+# WICHTIG: Modellname für Gemini 2.5 Flash-Lite
+GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 MAX_TEXT_CHARS = 8000
 KI_MAX_RETRIES = 3
-KI_TIMEOUT_SEKUNDEN = 60  # nur für Logs
+KI_TIMEOUT_SEKUNDEN = 60  # nur Info für Logs
 
 
 PROMPT_TEMPLATE = """
@@ -148,6 +149,7 @@ def get_gemini_client():
             "Bitte als Umgebungsvariable oder in Streamlit-Secrets hinterlegen."
         )
 
+    # Standard: Developer-API, nicht Vertex-AI
     return genai.Client(api_key=api_key)
 
 
@@ -172,7 +174,9 @@ def ki_aufrufen(prompt_text: str) -> str:
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=prompt_text,
-                config={"temperature": 0.0},
+                # für das SDK reicht in vielen Fällen der Default,
+                # Temperatur 0 für deterministischere Antworten:
+                # config={"temperature": 0.0},  # falls deine SDK-Version das erwartet
             )
             text = response.text
             print("[DEBUG] KI-Antwort erfolgreich empfangen.")
