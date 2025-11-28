@@ -1,13 +1,13 @@
 # programm_2_word_output.py
 # Aufgabe:
 # - Eine KI-Antwort-Textdatei mit JSON-Block verarbeiten
-# - JSON-Daten nachbearbeiten
+# - JSON-Daten nachbearbeiten (KOSTENSUMME_X, FRIST_DATUM, etc.)
 # - Word-Vorlage füllen
 # - Pfad zur erzeugten .docx zurückgeben
 
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from docxtpl import DocxTemplate
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -72,6 +72,11 @@ def daten_nachbearbeiten(daten: dict) -> dict:
 
         gesamt = rep + wm + pausch + gut
         daten["KOSTENSUMME_X"] = float_zu_euro(gesamt)
+
+    # FRIST_DATUM = heute + 14 Tage (falls nicht von der KI gesetzt)
+    if not daten.get("FRIST_DATUM"):
+        frist = datetime.now() + timedelta(days=14)
+        daten["FRIST_DATUM"] = frist.strftime("%d.%m.%Y")
 
     return daten
 
