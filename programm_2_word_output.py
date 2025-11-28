@@ -1,7 +1,7 @@
 # programm_2_word_output.py
 # Aufgabe:
 # - Eine KI-Antwort-Textdatei mit JSON-Block verarbeiten
-# - JSON-Daten nachbearbeiten (KOSTENSUMME_X, FRIST_DATUM, etc.)
+# - JSON-Daten nachbearbeiten (KOSTENSUMME_X, FRIST_DATUM, SCHADENHERGANG, etc.)
 # - Word-Vorlage füllen
 # - Pfad zur erzeugten .docx zurückgeben
 
@@ -58,7 +58,52 @@ def float_zu_euro(betrag: float) -> str:
     return s + " €"
 
 
+def baue_standard_schadenhergang(daten: dict) -> str:
+    """
+    Neutraler Fallback-Schadenhergang, falls das Feld komplett leer ist.
+    """
+    datum = (daten.get("UNFALL_DATUM") or "").strip()
+    ort = (daten.get("UNFALLORT") or "").strip()
+    strasse = (daten.get("UNFALL_STRASSE") or "").strip()
+
+    if datum:
+        s1 = f"Am {datum} ereignete sich"
+    else:
+        s1 = "Es ereignete sich"
+
+    if ort and strasse:
+        s1 += f" in {ort}, {strasse} ein Verkehrsunfall, an dem unser Mandant beteiligt war."
+    elif ort:
+        s1 += f" in {ort} ein Verkehrsunfall, an dem unser Mandant beteiligt war."
+    elif strasse:
+        s1 += f" in der {strasse} ein Verkehrsunfall, an dem unser Mandant beteiligt war."
+    else:
+        s1 += " ein Verkehrsunfall, an dem unser Mandant beteiligt war."
+
+    s2 = (
+        "Die näheren Umstände des Schadenhergangs ergeben sich aus dem beigefügten "
+        "Kfz-Schadengutachten."
+    )
+    s3 = (
+        "Zur Vermeidung von Wiederholungen nehmen wir auf die dortigen Ausführungen "
+        "vollumfänglich Bezug."
+    )
+
+    return " ".join([s1, s2, s3])
+
+
 def daten_nachbearbeiten(daten: dict) -> dict:
+    # SCHADENSNUMMER sicherstellen (falls KI-Feld fehlt oder leer ist)
+    daten.setdefault("SCHADENSNUMMER", "")
+
+    # SCHADENHERGANG-Feld sicherstellen
+    daten.setdefault("SCHADENHERGANG", "")
+
+    # Wichtige Unfall-Felder nicht blank lassen: Fallback "nicht bekannt"
+    for feld in ["UNFALL_DATUM", "UNFALL_UHRZEIT", "UNFALLORT", "UNFALL_STRASSE"]:
+        if not daten.get(feld):
+            daten[feld] = "nicht bekannt"
+
     # Falls FAHRZEUG_KENNZEICHEN nicht gesetzt ist, fallback auf KENNZEICHEN
     if not daten.get("FAHRZEUG_KENNZEICHEN"):
         daten["FAHRZEUG_KENNZEICHEN"] = daten.get("KENNZEICHEN", "")
@@ -77,6 +122,12 @@ def daten_nachbearbeiten(daten: dict) -> dict:
     if not daten.get("FRIST_DATUM"):
         frist = datetime.now() + timedelta(days=14)
         daten["FRIST_DATUM"] = frist.strftime("%d.%m.%Y")
+
+    # SCHADENHERGANG: nur Fallback, wenn komplett leer
+    sh = (daten.get("SCHADENHERGANG") or "").strip()
+    if not sh:
+        print("[WARNUNG] SCHADENHERGANG fehlt – Standardtext wird verwendet.")
+        daten["SCHADENHERGANG"] = baue_standard_schadenhergang(daten)
 
     return daten
 
