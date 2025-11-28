@@ -21,7 +21,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EINGANGS_ORDNER = os.path.join(BASE_DIR, "eingang_gutachten")
 KI_ANTWORT_ORDNER = os.path.join(BASE_DIR, "ki_antworten")
 
-# WICHTIG: Modellname für Gemini 2.5 Flash-Lite
+# Modellname für Gemini 2.5 Flash-Lite
 GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 MAX_TEXT_CHARS = 8000
@@ -58,7 +58,11 @@ BESONDERS WICHTIGE FELDER (NICHT LEER LASSEN, WENN IM TEXT IRGENDWO ERWÄHNT):
 
 4. UNFALLHERGANG:
    - Suche nach Abschnitten, die den Ablauf des Unfalls beschreiben ("Unfallhergang", "Sachverhalt", "zum Hergang", "es ereignete sich folgender Unfall").
-   - Fasse den beschriebenen Unfallhergang in 2–4 SÄTZEN kurz zusammen.
+   - Erstelle eine ZUSAMMENHÄNGENDE, SACHLICHE BESCHREIBUNG in MINDESTENS 3 und höchstens 6 VOLLSTÄNDIGEN SÄTZEN.
+   - Verwende möglichst viele konkrete Details aus dem Gutachten (z.B. Fahrtrichtung, Fahrstreifen, Kreuzung, Ein-/Ausbiegen, Bremsen, Geschwindigkeiten, Verkehrszeichen, Vorrang/Vorfahrt).
+   - KEINE Standard-Floskeln wie "Es kam zu einem Unfall" ohne Inhalt.
+   - KEINE Vermutungen, KEINE Ergänzungen, die nicht aus dem Text hervorgehen.
+   - Wenn der Sachverhalt nur knapp beschrieben ist, wiederhole die vorhandenen Fakten in eigenen Worten, aber bleibe inhaltlich strikt beim Gutachten.
 
 5. FRIST_DATUM:
    - Dieses Feld lässt du LEER (""), es wird später automatisch vom System gesetzt (14 Tage ab Datum des Schreibens).
@@ -84,7 +88,7 @@ AUSGABEFORMAT:
 
    Polizei Aktennummer (VG/.../...): ...
 
-   Wie ereignete sich der Unfall: ...
+   Wie ereignete sich der Unfall: (mindestens 3 sinnvolle, vollständige Sätze, die den tatsächlichen Sachverhalt beschreiben)
    Reparaturkosten: ...
    Wertminderung: ...
    Kostenpauschale: ...
@@ -178,7 +182,7 @@ def ki_aufrufen(prompt_text: str) -> str:
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=prompt_text,
-                # falls nötig, kann man hier generation_config ergänzen, z.B.:
+                # Optional – falls deine genai-Version generation_config erwartet:
                 # generation_config={"temperature": 0.0},
             )
             text = response.text
