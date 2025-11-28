@@ -78,20 +78,6 @@ if st.button("Gutachten verarbeiten (Programm 1 + Programm 2)"):
 
 st.header("2. Letztes Anwaltsschreiben herunterladen")
 
-
-def finde_neueste_docx(ordner: str):
-    if not os.path.isdir(ordner):
-        return None
-    dateien = [
-        os.path.join(ordner, d)
-        for d in os.listdir(ordner)
-        if d.lower().ends_with(".docx")
-    ]
-    if not dateien:
-        return None
-    return max(dateien, key=os.path.getmtime)
-
-
 neueste_docx = None
 if os.path.isdir(AUSGANGS_ORDNER):
     files = [
@@ -125,6 +111,13 @@ else:
 with st.expander("Debug: Dateien im System anzeigen"):
     ki_ordner = os.path.join(BASE_DIR, "ki_antworten")
     out_ordner = AUSGANGS_ORDNER
+    in_ordner = EINGANGS_ORDNER
+
+    st.subheader("Eingang Gutachten (eingang_gutachten)")
+    if os.path.isdir(in_ordner):
+        st.write(os.listdir(in_ordner))
+    else:
+        st.write("Ordner existiert nicht.")
 
     st.subheader("KI-Antworten (ki_antworten)")
     if os.path.isdir(ki_ordner):
