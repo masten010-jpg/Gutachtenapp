@@ -57,11 +57,14 @@ BESONDERS WICHTIGE FELDER (NICHT LEER LASSEN, WENN IM TEXT IRGENDWO ERWÄHNT):
 
 6. SCHADENSNUMMER:
    - Suche nach Angaben wie "Schadensnummer", "Schaden-Nr.", "Schaden-Nr", "Schaden-Nummer".
-   - Berücksichtige außerdem Bezeichnungen wie "Versicherungsnummer", "Versicherungsschein-Nr.",
-     "VS-Nr", "VS_Nr", wenn sie im Kontext der Regulierung / Versicherung stehen.
-   - Wenn eine solche Nummer erkennbar ist, trage sie in SCHADENSNUMMER ein.
-   - Gib die Nummer EXAKT so zurück, wie sie im Text steht (inkl. / - . etc.).
-   - Wenn keine passende Nummer erkennbar ist, setze SCHADENSNUMMER auf "" (leer) und erfinde nichts.
+   - Berücksichtige außerdem Bezeichnungen wie:
+     "Versicherungsnummer", "Versicherungsschein-Nr.", "VS-Nr", "VS_Nr", "VS Nr.", "VSNR".
+   - Wenn eine dieser Nummern im Zusammenhang mit der Versicherung / Regulierung steht,
+     behandle sie als SCHADENSNUMMER und trage sie dort ein.
+   - Gib die Nummer EXAKT so zurück, wie sie im Text steht (inkl. / - . / etc.).
+   - Wenn wirklich keine passende Nummer erkennbar ist, setze SCHADENSNUMMER auf "" (leer)
+     und erfinde nichts.
+
 
 
 
