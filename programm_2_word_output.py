@@ -59,9 +59,6 @@ def float_zu_euro(betrag: float) -> str:
 
 
 def baue_standard_schadenhergang(daten: dict) -> str:
-    """
-    Neutraler Fallback-Schadenhergang, falls das Feld komplett leer ist.
-    """
     datum = (daten.get("UNFALL_DATUM") or "").strip()
     ort = (daten.get("UNFALLORT") or "").strip()
     strasse = (daten.get("UNFALL_STRASSE") or "").strip()
@@ -93,39 +90,48 @@ def baue_standard_schadenhergang(daten: dict) -> str:
 
 
 def daten_nachbearbeiten(daten: dict) -> dict:
-    # Wichtige Keys sicherstellen
-    daten.setdefault("SCHADENSNUMMER", "")
-    daten.setdefault("SCHADENHERGANG", "")
-    daten.setdefault("AKTENZEICHEN", "")
-    daten.setdefault("HEUTDATUM", "")
+    # Sicherstellen, dass alle erwarteten Keys existieren
+    alle_keys = [
+        "MANDANT_VORNAME", "MANDANT_NACHNAME", "MANDANT_NAME",
+        "MANDANT_STRASSE", "MANDANT_PLZ_ORT",
+        "UNFALL_DATUM", "UNFALL_UHRZEIT", "UNFALLORT", "UNFALL_STRASSE",
+        "FAHRZEUGTYP", "KENNZEICHEN", "FAHRZEUG_KENNZEICHEN",
+        "POLIZEIAKTE_NUMMER", "SCHADENSNUMMER", "AKTENZEICHEN",
+        "SCHADENHERGANG",
+        "REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN",
+        "KOSTENSUMME_X",
+        "FRIST_DATUM", "HEUTDATUM",
+    ]
+    for k in alle_keys:
+        daten.setdefault(k, "")
 
-    # Wichtige Unfall-Felder nicht blank lassen: Fallback "nicht bekannt"
-    for feld in ["UNFALL_DATUM", "UNFALL_UHRZEIT", "UNFALLORT", "UNFALL_STRASSE"]:
-        if not daten.get(feld):
+    # Textfelder, die nicht leer sein sollen → "nicht bekannt" als Fallback
+    text_felder_mit_fallback = [
+        "MANDANT_VORNAME", "MANDANT_NACHNAME", "MANDANT_NAME",
+        "MANDANT_STRASSE", "MANDANT_PLZ_ORT",
+        "UNFALL_DATUM", "UNFALL_UHRZEIT", "UNFALLORT", "UNFALL_STRASSE",
+        "FAHRZEUGTYP", "KENNZEICHEN",
+        "POLIZEIAKTE_NUMMER", "SCHADENSNUMMER", "AKTENZEICHEN",
+    ]
+    for feld in text_felder_mit_fallback:
+        if not (daten.get(feld) or "").strip():
             daten[feld] = "nicht bekannt"
 
     # FAHRZEUG_KENNZEICHEN: Fallback auf KENNZEICHEN
-    if not daten.get("FAHRZEUG_KENNZEICHEN"):
-        daten["FAHRZEUG_KENNZEICHEN"] = daten.get("KENNZEICHEN", "")
+    if not (daten.get("FAHRZEUG_KENNZEICHEN") or "").strip():
+        daten["FAHRZEUG_KENNZEICHEN"] = daten.get("KENNZEICHEN", "nicht bekannt")
 
-    # Geld-Felder normalisieren und sicherstellen, dass nie komplett leer sind
+    # Geld-Felder normalisieren und Floats sammeln
     geld_felder = ["REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN"]
     geld_werte = {}
-
     for feld in geld_felder:
         roh = (daten.get(feld) or "").strip()
         betrag = euro_zu_float(roh)
-        # Immer ein sauber formatiertes Eurofeld schreiben
-        daten[feld] = float_zu_euro(betrag)
         geld_werte[feld] = betrag
+        daten[feld] = float_zu_euro(betrag)
 
-    # KOSTENSUMME_X immer aus den vier Geldfeldern berechnen
-    gesamt = (
-        geld_werte["REPARATURKOSTEN"]
-        + geld_werte["WERTMINDERUNG"]
-        + geld_werte["KOSTENPAUSCHALE"]
-        + geld_werte["GUTACHTERKOSTEN"]
-    )
+    # KOSTENSUMME_X = Summe aller vier Geldfelder
+    gesamt = sum(geld_werte.values())
     daten["KOSTENSUMME_X"] = float_zu_euro(gesamt)
 
     # FRIST_DATUM = heute + 14 Tage
@@ -133,8 +139,7 @@ def daten_nachbearbeiten(daten: dict) -> dict:
     daten["FRIST_DATUM"] = frist.strftime("%d.%m.%Y")
 
     # HEUTDATUM = heutiges Datum (Upload/Verarbeitung)
-    heute = datetime.now()
-    daten["HEUTDATUM"] = heute.strftime("%d.%m.%Y")
+    daten["HEUTDATUM"] = datetime.now().strftime("%d.%m.%Y")
 
     # SCHADENHERGANG: nur Fallback, wenn komplett leer
     sh = (daten.get("SCHADENHERGANG") or "").strip()
@@ -200,11 +205,6 @@ def neueste_ki_datei_finden() -> str | None:
 
 
 def main(pfad_ki_txt: str | None = None) -> str | None:
-    """
-    Wenn pfad_ki_txt angegeben ist, wird GENAU diese KI-Antwort verarbeitet.
-    Wenn nicht, wird die neueste *_ki.txt im Ordner verwendet.
-    Gibt den Pfad der erzeugten .docx zurück.
-    """
     os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
     os.makedirs(AUSGANGS_ORDNER, exist_ok=True)
 
@@ -216,8 +216,7 @@ def main(pfad_ki_txt: str | None = None) -> str | None:
     if not os.path.isfile(pfad_ki_txt):
         raise FileNotFoundError(f"Angegebene KI-Datei existiert nicht: {pfad_ki_txt}")
 
-    docx_pfad = ki_datei_verarbeiten(pfad_ki_txt)
-    return docx_pfad
+    return ki_datei_verarbeiten(pfad_ki_txt)
 
 
 if __name__ == "__main__":
