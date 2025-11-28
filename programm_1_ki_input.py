@@ -60,6 +60,9 @@ BESONDERS WICHTIGE FELDER (NICHT LEER LASSEN, WENN IM TEXT IRGENDWO ERWÄHNT):
    - Suche nach Abschnitten, die den Ablauf des Unfalls beschreiben ("Unfallhergang", "Sachverhalt", "zum Hergang", "es ereignete sich folgender Unfall").
    - Fasse den beschriebenen Unfallhergang in 2–4 SÄTZEN kurz zusammen.
 
+5. FRIST_DATUM:
+   - Dieses Feld lässt du LEER (""), es wird später automatisch vom System gesetzt (14 Tage ab Datum des Schreibens).
+
 AUSGABEFORMAT:
 
 1. Zuerst eine gut lesbare Stichpunktliste im folgenden Schema:
@@ -122,7 +125,9 @@ JSON_START
   "WERTMINDERUNG": "",
   "KOSTENPAUSCHALE": "",
   "GUTACHTERKOSTEN": "",
-  "KOSTENSUMME_X": ""
+  "KOSTENSUMME_X": "",
+
+  "FRIST_DATUM": ""
 }
 JSON_END
 
@@ -149,7 +154,6 @@ def get_gemini_client():
             "Bitte als Umgebungsvariable oder in Streamlit-Secrets hinterlegen."
         )
 
-    # Standard: Developer-API, nicht Vertex-AI
     return genai.Client(api_key=api_key)
 
 
@@ -174,9 +178,8 @@ def ki_aufrufen(prompt_text: str) -> str:
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=prompt_text,
-                # für das SDK reicht in vielen Fällen der Default,
-                # Temperatur 0 für deterministischere Antworten:
-                # config={"temperature": 0.0},  # falls deine SDK-Version das erwartet
+                # falls nötig, kann man hier generation_config ergänzen, z.B.:
+                # generation_config={"temperature": 0.0},
             )
             text = response.text
             print("[DEBUG] KI-Antwort erfolgreich empfangen.")
