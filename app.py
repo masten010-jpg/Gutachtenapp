@@ -1,3 +1,4 @@
+# app.py
 import os
 from datetime import datetime
 
@@ -39,37 +40,39 @@ if st.button("Gutachten verarbeiten (Programm 1 + Programm 2)"):
         safe_name = f"gutachten_{timestamp}.pdf"
         pdf_path = os.path.join(EINGANGS_ORDNER, safe_name)
 
-        with open(pdf_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-
-        st.info(f"PDF gespeichert als: {safe_name}")
-
         try:
-            with st.spinner("Verarbeite Gutachten mit KI..."):
-                # Programm 1: PDF → KI → *_ki.txt, gibt Pfad zurück
-                pfad_ki = programm_1_ki_input.main()
-
-                if pfad_ki is None:
-                    raise RuntimeError(
-                        "Programm 1 hat keine KI-Antwort erzeugt "
-                        "(keine PDF gefunden oder KI-Fehler)."
-                    )
-
-                # Programm 2: *_ki.txt → Word-Dokument, gibt Pfad zur .docx zurück
-                docx_pfad = programm_2_word_output.main(pfad_ki)
-
-                if docx_pfad is None or not os.path.isfile(docx_pfad):
-                    raise RuntimeError(
-                        "Programm 2 hat kein Schreiben erzeugt."
-                    )
-
-            st.success(
-                "Verarbeitung abgeschlossen. Das Schreiben kann jetzt "
-                "unter Punkt 2 heruntergeladen werden."
-            )
-
+            with open(pdf_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
         except Exception as e:
-            st.error(f"Fehler bei der Verarbeitung: {e}")
+            st.error(f"Fehler beim Speichern der PDF-Datei: {e}")
+        else:
+            st.info(f"PDF gespeichert als: {safe_name}")
+
+            try:
+                with st.spinner("Verarbeite Gutachten mit KI..."):
+                    # Programm 1: genau DIESE PDF an Gemini → *_ki.txt
+                    pfad_ki = programm_1_ki_input.main(pdf_path)
+
+                    if pfad_ki is None or not os.path.isfile(pfad_ki):
+                        raise RuntimeError(
+                            "Programm 1 hat keine gültige KI-Antwort erzeugt."
+                        )
+
+                    # Programm 2: *_ki.txt → Word-Dokument
+                    docx_pfad = programm_2_word_output.main(pfad_ki)
+
+                    if docx_pfad is None or not os.path.isfile(docx_pfad):
+                        raise RuntimeError(
+                            "Programm 2 hat kein Schreiben erzeugt."
+                        )
+
+                st.success(
+                    "Verarbeitung abgeschlossen. Das Schreiben kann jetzt "
+                    "unter Punkt 2 heruntergeladen werden."
+                )
+
+            except Exception as e:
+                st.error(f"Fehler bei der Verarbeitung: {e}")
 
 
 # --------------------------------------------------
@@ -105,7 +108,7 @@ else:
 
 
 # --------------------------------------------------
-# 3) Debug-Infos (optional, aber sehr hilfreich)
+# 3) Debug-Infos (optional)
 # --------------------------------------------------
 
 with st.expander("Debug: Dateien im System anzeigen"):
