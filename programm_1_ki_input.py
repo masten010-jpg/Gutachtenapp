@@ -22,7 +22,7 @@ EINGANGS_ORDNER = os.path.join(BASE_DIR, "eingang_gutachten")
 KI_ANTWORT_ORDNER = os.path.join(BASE_DIR, "ki_antworten")
 
 # Modellname für Gemini 2.5 Flash-Lite
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 MAX_TEXT_CHARS = 8000
 KI_MAX_RETRIES = 3
