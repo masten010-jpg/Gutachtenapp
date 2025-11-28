@@ -1,10 +1,4 @@
 # programm_2_word_output.py
-# Aufgabe:
-# - Eine KI-Antwort-Textdatei mit JSON-Block verarbeiten
-# - JSON-Daten nachbearbeiten (KOSTENSUMME_X, FRIST_DATUM, SCHADENHERGANG, etc.)
-# - Word-Vorlage füllen
-# - Pfad zur erzeugten .docx zurückgeben
-
 import os
 import json
 from datetime import datetime, timedelta
@@ -28,13 +22,30 @@ def json_aus_ki_antwort_parsen(ki_text: str) -> dict:
         raise ValueError("JSON_START oder JSON_END nicht gefunden in KI-Antwort.")
 
     json_roh = ki_text[start_idx + len(JSON_START_MARKER):end_idx].strip()
-    json_roh = json_roh.strip("` \n")
+
+    # KI kann sowas schreiben wie:
+    # JSON_START
+    # ```json
+    # { ... }
+    # ```
+    # JSON_END
+    # → wir extrahieren nur den Teil zwischen der ersten und letzten Klammer
+    first_brace = json_roh.find("{")
+    last_brace = json_roh.rfind("}")
+
+    if first_brace == -1 or last_brace == -1 or first_brace >= last_brace:
+        raise ValueError(
+            "Kein gültiger JSON-Block ({}-Klammern) in KI-Antwort gefunden.\n"
+            f"Auszug: {json_roh[:300]}"
+        )
+
+    json_clean = json_roh[first_brace:last_brace + 1]
 
     try:
-        daten = json.loads(json_roh)
+        daten = json.loads(json_clean)
     except json.JSONDecodeError as e:
         raise ValueError(
-            f"JSON konnte nicht geparst werden: {e}\nAuszug: {json_roh[:500]}"
+            f"JSON konnte nicht geparst werden: {e}\nAuszug: {json_clean[:500]}"
         ) from e
 
     return daten
@@ -90,7 +101,6 @@ def baue_standard_schadenhergang(daten: dict) -> str:
 
 
 def daten_nachbearbeiten(daten: dict) -> dict:
-    # Sicherstellen, dass alle erwarteten Keys existieren
     alle_keys = [
         "MANDANT_VORNAME", "MANDANT_NACHNAME", "MANDANT_NAME",
         "MANDANT_STRASSE", "MANDANT_PLZ_ORT",
@@ -105,7 +115,6 @@ def daten_nachbearbeiten(daten: dict) -> dict:
     for k in alle_keys:
         daten.setdefault(k, "")
 
-    # Textfelder, die nicht leer sein sollen → "nicht bekannt" als Fallback
     text_felder_mit_fallback = [
         "MANDANT_VORNAME", "MANDANT_NACHNAME", "MANDANT_NAME",
         "MANDANT_STRASSE", "MANDANT_PLZ_ORT",
@@ -117,11 +126,9 @@ def daten_nachbearbeiten(daten: dict) -> dict:
         if not (daten.get(feld) or "").strip():
             daten[feld] = "nicht bekannt"
 
-    # FAHRZEUG_KENNZEICHEN: Fallback auf KENNZEICHEN
     if not (daten.get("FAHRZEUG_KENNZEICHEN") or "").strip():
         daten["FAHRZEUG_KENNZEICHEN"] = daten.get("KENNZEICHEN", "nicht bekannt")
 
-    # Geld-Felder normalisieren und Floats sammeln
     geld_felder = ["REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN"]
     geld_werte = {}
     for feld in geld_felder:
@@ -130,21 +137,15 @@ def daten_nachbearbeiten(daten: dict) -> dict:
         geld_werte[feld] = betrag
         daten[feld] = float_zu_euro(betrag)
 
-    # KOSTENSUMME_X = Summe aller vier Geldfelder
     gesamt = sum(geld_werte.values())
     daten["KOSTENSUMME_X"] = float_zu_euro(gesamt)
-
-    # Alias für Word: Gesamtsumme
     daten["GESAMTSUMME"] = daten["KOSTENSUMME_X"]
 
-    # FRIST_DATUM = heute + 14 Tage
-    frist = datetime.now() + timedelta(days=14)
+    jetzt = datetime.now()
+    frist = jetzt + timedelta(days=14)
     daten["FRIST_DATUM"] = frist.strftime("%d.%m.%Y")
+    daten["HEUTDATUM"] = jetzt.strftime("%d.%m.%Y")
 
-    # HEUTDATUM = heutiges Datum (Upload/Verarbeitung)
-    daten["HEUTDATUM"] = datetime.now().strftime("%d.%m.%Y")
-
-    # SCHADENHERGANG: nur Fallback, wenn komplett leer
     sh = (daten.get("SCHADENHERGANG") or "").strip()
     if not sh:
         print("[WARNUNG] SCHADENHERGANG fehlt – Standardtext wird verwendet.")
