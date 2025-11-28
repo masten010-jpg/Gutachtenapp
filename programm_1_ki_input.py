@@ -57,9 +57,13 @@ BESONDERS WICHTIGE FELDER (NICHT LEER LASSEN, WENN IM TEXT IRGENDWO ERWÄHNT):
 
 6. SCHADENSNUMMER:
    - Suche nach Angaben wie "Schadensnummer", "Schaden-Nr.", "Schaden-Nr", "Schaden-Nummer".
-   - Typischerweise von einer Versicherung oder einem regulierenden Unternehmen vergeben.
-   - Wenn vorhanden, gib sie EXAKT so zurück, wie sie im Text steht (inkl. / - . etc.).
-   - Wenn keine Schadensnummer erkennbar ist, setze "".
+   - Berücksichtige außerdem Bezeichnungen wie "Versicherungsnummer", "Versicherungsschein-Nr.",
+     "VS-Nr", "VS_Nr", wenn sie im Kontext der Regulierung / Versicherung stehen.
+   - Wenn eine solche Nummer erkennbar ist, trage sie in SCHADENSNUMMER ein.
+   - Gib die Nummer EXAKT so zurück, wie sie im Text steht (inkl. / - . etc.).
+   - Wenn keine passende Nummer erkennbar ist, setze SCHADENSNUMMER auf "" (leer) und erfinde nichts.
+
+
 
 7. AKTENZEICHEN:
    - Suche nach "Aktenzeichen", "Az.", "AZ:" außerhalb des Polizeikontexts, z.B. als internes Aktenzeichen, Kanzlei- oder Gerichtszeichen.
