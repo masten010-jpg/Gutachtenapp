@@ -60,13 +60,22 @@ BESONDERS WICHTIGE FELDER (NICHT LEER LASSEN, WENN IM TEXT IRGENDWO ERWÄHNT):
 4. UNFALLHERGANG:
    - Suche nach Abschnitten, die den Ablauf des Unfalls beschreiben ("Unfallhergang", "Sachverhalt", "zum Hergang", "es ereignete sich folgender Unfall").
    - Erstelle eine ZUSAMMENHÄNGENDE, SACHLICHE BESCHREIBUNG in MINDESTENS 3 und höchstens 6 VOLLSTÄNDIGEN SÄTZEN.
+   - Beschreibe NUR den tatsächlichen Ablauf des Unfalls (Wer? Welches Fahrzeug? Von wo nach wo? Welche Fahrmanöver? Wodurch kam es zur Kollision?).
    - Verwende möglichst viele konkrete Details aus dem Gutachten (z.B. Fahrtrichtung, Fahrstreifen, Kreuzung, Ein-/Ausbiegen, Bremsen, Geschwindigkeiten, Verkehrszeichen, Vorrang/Vorfahrt).
+   - KEINE Anrede, KEINE Forderungen, KEINE Aufforderungen, KEIN Anwaltsschreiben, KEIN Brieftext.
+   - KEINE juristische Bewertung, KEINE Worte wie "Schadenersatz", "Regulierung", "bringen wir zur Anzeige", "machen wir geltend".
    - KEINE Standard-Floskeln wie "Es kam zu einem Unfall" ohne Inhalt.
    - KEINE Vermutungen, KEINE Ergänzungen, die nicht aus dem Text hervorgehen.
-   - Wenn der Sachverhalt nur knapp beschrieben ist, wiederhole die vorhandenen Fakten in eigenen Worten, aber bleibe inhaltlich strikt beim Gutachten.
+   - Wenn der Sachverhalt nur knapp beschrieben ist, formuliere diese Sätze in eigenen Worten um, erweitere aber NICHT um zusätzliche Fakten.
 
 5. FRIST_DATUM:
    - Dieses Feld lässt du LEER (""), es wird später automatisch vom System gesetzt (14 Tage ab Datum des Schreibens).
+
+6. SCHADENSNUMMER:
+   - Suche nach Angaben wie "Schadensnummer", "Schaden-Nr.", "Schaden-Nr", "Schaden-Nummer".
+   - Typischerweise von einer Versicherung oder einem regulierenden Unternehmen vergeben.
+   - Wenn vorhanden, gib sie EXAKT so zurück, wie sie im Text steht (inkl. / - . etc.).
+   - Wenn keine Schadensnummer erkennbar ist, setze "".
 
 AUSGABEFORMAT:
 
@@ -88,6 +97,7 @@ AUSGABEFORMAT:
    Fahrzeug Kennzeichen: ...
 
    Polizei Aktennummer (VG/.../...): ...
+   Schadensnummer: ...
 
    Wie ereignete sich der Unfall: (mindestens 3 sinnvolle, vollständige Sätze, die den tatsächlichen Sachverhalt beschreiben)
    Reparaturkosten: ...
@@ -123,6 +133,7 @@ JSON_START
   "FAHRZEUG_KENNZEICHEN": "",
 
   "POLIZEIAKTE_NUMMER": "",
+  "SCHADENSNUMMER": "",
 
   "UNFALLHERGANG": "",
 
@@ -183,7 +194,8 @@ def ki_aufrufen(prompt_text: str) -> str:
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=prompt_text,
-                # generation_config={"temperature": 0.0},  # falls deine genai-Version das so braucht
+                # Optional – falls deine genai-Version generation_config erwartet:
+                # generation_config={"temperature": 0.0},
             )
             text = response.text
             print("[DEBUG] KI-Antwort erfolgreich empfangen.")
@@ -250,7 +262,7 @@ def main() -> str | None:
 
     if neueste_pdf is None:
         print("Keine PDF-Datei im Ordner gefunden.")
-        # hier expliziter Hinweis:
+        # Expliziter Hinweis:
         raise RuntimeError("Kein Gutachten gefunden. Laden Sie ein Gutachten hoch!")
 
     print(f"Neueste PDF gefunden: {neueste_pdf}")
