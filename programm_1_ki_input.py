@@ -27,6 +27,7 @@ GEMINI_MODEL = "gemini-2.5-flash-lite"
 MAX_TEXT_CHARS = 8000
 KI_MAX_RETRIES = 3
 KI_TIMEOUT_SEKUNDEN = 60  # nur Info für Logs
+MIN_TEXT_CHARS = 500      # Mindestlänge, damit es als "Gutachten" durchgeht
 
 
 PROMPT_TEMPLATE = """
@@ -182,8 +183,7 @@ def ki_aufrufen(prompt_text: str) -> str:
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=prompt_text,
-                # Optional – falls deine genai-Version generation_config erwartet:
-                # generation_config={"temperature": 0.0},
+                # generation_config={"temperature": 0.0},  # falls deine genai-Version das so braucht
             )
             text = response.text
             print("[DEBUG] KI-Antwort erfolgreich empfangen.")
@@ -250,12 +250,20 @@ def main() -> str | None:
 
     if neueste_pdf is None:
         print("Keine PDF-Datei im Ordner gefunden.")
-        return None
+        # hier expliziter Hinweis:
+        raise RuntimeError("Kein Gutachten gefunden. Laden Sie ein Gutachten hoch!")
 
     print(f"Neueste PDF gefunden: {neueste_pdf}")
 
     voller_text = pdf_text_auslesen(neueste_pdf)
     print("[DEBUG] Länge des vollen Gutachten-Textes:", len(voller_text), "Zeichen")
+
+    if not voller_text or len(voller_text.strip()) < MIN_TEXT_CHARS:
+        print("Zu wenig verwertbarer Text im Dokument. Abbruch.")
+        raise RuntimeError(
+            "Das hochgeladene Dokument enthält zu wenig verwertbare Informationen. "
+            "Laden Sie ein vollständiges Gutachten hoch!"
+        )
 
     gutachten_text = voller_text
     if len(gutachten_text) > MAX_TEXT_CHARS:
