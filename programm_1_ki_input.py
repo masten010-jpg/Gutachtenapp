@@ -22,7 +22,7 @@ EINGANGS_ORDNER = os.path.join(BASE_DIR, "eingang_gutachten")
 KI_ANTWORT_ORDNER = os.path.join(BASE_DIR, "ki_antworten")
 
 # Modellname für Gemini 2.5 Flash-Lite
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 MAX_TEXT_CHARS = 8000
 KI_MAX_RETRIES = 3
@@ -33,7 +33,7 @@ MIN_TEXT_CHARS = 500      # Mindestlänge, damit es als "Gutachten" durchgeht
 PROMPT_TEMPLATE = """
 Du bist eine spezialisierte KI für die Auswertung von deutschsprachigen Kfz-Schadensgutachten.
 Deine einzige Aufgabe ist es, bestimmte Informationen GENAU so aus dem Text zu EXTRAHIEREN,
-wie sie dort stehen (Namen, Adressen, Orte, Daten, Kennzeichen, Geldbeträge).
+wie sie dort stehen (Namen, Adressen, Orte, Daten, Kennzeichen, Geldbeträge, Textpassagen).
 
 WICHTIG:
 - Erfinde KEINE Daten. Wenn etwas nicht eindeutig im Text steht, setze den Wert auf "".
@@ -57,16 +57,13 @@ BESONDERS WICHTIGE FELDER (NICHT LEER LASSEN, WENN IM TEXT IRGENDWO ERWÄHNT):
    - Suche nach Angaben wie "Aktenzeichen", "Polizeivorgangsnummer", "Vorgangsnummer", "Geschäftszeichen" im Zusammenhang mit Polizei.
    - Wenn du eine solche Nummer findest, trage sie in POLIZEIAKTE_NUMMER ein.
 
-4. UNFALLHERGANG:
-   - Suche nach Abschnitten, die den Ablauf des Unfalls beschreiben ("Unfallhergang", "Sachverhalt", "zum Hergang", "es ereignete sich folgender Unfall").
-   - Erstelle eine ZUSAMMENHÄNGENDE, SACHLICHE BESCHREIBUNG in MINDESTENS 3 und höchstens 6 VOLLSTÄNDIGEN SÄTZEN.
-   - Beschreibe NUR den tatsächlichen Ablauf des Unfalls (Wer? Welches Fahrzeug? Von wo nach wo? Welche Fahrmanöver? Wodurch kam es zur Kollision?).
-   - Verwende möglichst viele konkrete Details aus dem Gutachten (z.B. Fahrtrichtung, Fahrstreifen, Kreuzung, Ein-/Ausbiegen, Bremsen, Geschwindigkeiten, Verkehrszeichen, Vorrang/Vorfahrt).
-   - KEINE Anrede, KEINE Forderungen, KEINE Aufforderungen, KEIN Anwaltsschreiben, KEIN Brieftext.
-   - KEINE juristische Bewertung, KEINE Worte wie "Schadenersatz", "Regulierung", "bringen wir zur Anzeige", "machen wir geltend".
-   - KEINE Standard-Floskeln wie "Es kam zu einem Unfall" ohne Inhalt.
-   - KEINE Vermutungen, KEINE Ergänzungen, die nicht aus dem Text hervorgehen.
-   - Wenn der Sachverhalt nur knapp beschrieben ist, formuliere diese Sätze in eigenen Worten um, erweitere aber NICHT um zusätzliche Fakten.
+4. SCHADENHERGANG:
+   - Suche nach einer Überschrift wie "Schadenhergang", "Schadenshergang" oder einer sehr ähnlichen Formulierung.
+   - Wenn es keine solche Überschrift gibt, suche nach "Unfallhergang" oder "Sachverhalt".
+   - Für SCHADENHERGANG sollst du den TEXTABSCHNITT UNTERHALB DIESER ÜBERSCHRIFT möglichst WÖRTLICH übernehmen.
+   - KEINE UMSCHREIBUNG, KEINE ZUSAMMENFASSUNG, KEINE eigenen Formulierungen. So nah wie möglich am Original.
+   - Typischerweise endet der Abschnitt beim nächsten Überschriftstitel oder einem deutlichen Themenwechsel.
+   - Wenn du keine passende Überschrift findest, setze SCHADENHERGANG auf "".
 
 5. FRIST_DATUM:
    - Dieses Feld lässt du LEER (""), es wird später automatisch vom System gesetzt (14 Tage ab Datum des Schreibens).
@@ -76,7 +73,15 @@ BESONDERS WICHTIGE FELDER (NICHT LEER LASSEN, WENN IM TEXT IRGENDWO ERWÄHNT):
    - Typischerweise von einer Versicherung oder einem regulierenden Unternehmen vergeben.
    - Wenn vorhanden, gib sie EXAKT so zurück, wie sie im Text steht (inkl. / - . etc.).
    - Wenn keine Schadensnummer erkennbar ist, setze "".
-7. Schadenshergang: suche nach Schadenhergang passage(3-4sätze)
+
+7. AKTENZEICHEN:
+   - Suche nach "Aktenzeichen", "Az.", "AZ:" außerhalb des Polizeikontexts, z.B. als internes Aktenzeichen, Kanzlei- oder Gerichtszeichen.
+   - Wenn ein solches Aktenzeichen vorhanden ist, gib es EXAKT so zurück.
+   - Wenn kein Aktenzeichen erkennbar ist, setze "".
+
+8. HEUTDATUM:
+   - Dieses Feld lässt du LEER ("").
+   - Es wird vom System automatisch mit dem Datum der Verarbeitung/Upload gefüllt.
 
 AUSGABEFORMAT:
 
@@ -99,14 +104,16 @@ AUSGABEFORMAT:
 
    Polizei Aktennummer (VG/.../...): ...
    Schadensnummer: ...
+   Aktenzeichen: ...
 
-   Wie ereignete sich der Unfall: (mindestens 3 sinnvolle, vollständige Sätze, die den tatsächlichen Schadenshergang beschreiben)
-   Schadenshergang:...
+   Schadenhergang (Originaltext aus dem Gutachten): ...
    Reparaturkosten: ...
    Wertminderung: ...
    Kostenpauschale: ...
    Gutachterkosten: ...
    Kostensumme X (Reparatur + Wertminderung + Kostenpauschale + Gutachterkosten): ...
+
+   Heutiges Datum (wird vom System gesetzt): ...
 
 2. Danach gibst du GENAU die gleichen Informationen als reines JSON aus.
    WICHTIG:
@@ -136,8 +143,9 @@ JSON_START
 
   "POLIZEIAKTE_NUMMER": "",
   "SCHADENSNUMMER": "",
+  "AKTENZEICHEN": "",
 
-  "UNFALLHERGANG": "",
+  "SCHADENHERGANG": "",
 
   "REPARATURKOSTEN": "",
   "WERTMINDERUNG": "",
@@ -145,7 +153,8 @@ JSON_START
   "GUTACHTERKOSTEN": "",
   "KOSTENSUMME_X": "",
 
-  "FRIST_DATUM": ""
+  "FRIST_DATUM": "",
+  "HEUTDATUM": ""
 }
 JSON_END
 
@@ -196,7 +205,6 @@ def ki_aufrufen(prompt_text: str) -> str:
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=prompt_text,
-                # Optional – falls deine genai-Version generation_config erwartet:
                 # generation_config={"temperature": 0.0},
             )
             text = response.text
@@ -264,7 +272,6 @@ def main() -> str | None:
 
     if neueste_pdf is None:
         print("Keine PDF-Datei im Ordner gefunden.")
-        # Expliziter Hinweis:
         raise RuntimeError("Kein Gutachten gefunden. Laden Sie ein Gutachten hoch!")
 
     print(f"Neueste PDF gefunden: {neueste_pdf}")
