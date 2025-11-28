@@ -1,34 +1,21 @@
 # programm_1_ki_input.py
-# Aufgabe:
-# - Neueste PDF in "eingang_gutachten" finden
-# - Text auslesen
-# - Klaren Extraktions-Prompt an Google Gemini schicken
-# - Antwort als *_ki.txt in "ki_antworten" speichern
-# - Pfad zur gespeicherten *_ki.txt zurückgeben
-
 import os
 import time
 import pdfplumber
 from google import genai
 from google.genai import errors as genai_errors
 
-# -------------------------
-# BASISPFAD & ORDNER
-# -------------------------
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EINGANGS_ORDNER = os.path.join(BASE_DIR, "eingang_gutachten")
 KI_ANTWORT_ORDNER = os.path.join(BASE_DIR, "ki_antworten")
 
-# Modellname für Gemini 2.5 Flash-Lite
 GEMINI_MODEL = "gemini-2.5-flash"
 
 MAX_TEXT_CHARS = 8000
 KI_MAX_RETRIES = 3
-KI_TIMEOUT_SEKUNDEN = 60  # nur Info für Logs
-MIN_TEXT_CHARS = 500      # Mindestlänge, damit es als "Gutachten" durchgeht
-
+KI_TIMEOUT_SEKUNDEN = 60
+MIN_TEXT_CHARS = 500
 
 PROMPT_TEMPLATE = """
 Du bist eine spezialisierte KI für die Auswertung von deutschsprachigen Kfz-Schadensgutachten.
@@ -205,7 +192,6 @@ def ki_aufrufen(prompt_text: str) -> str:
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=prompt_text,
-                # generation_config={"temperature": 0.0},
             )
             text = response.text
             print("[DEBUG] KI-Antwort erfolgreich empfangen.")
@@ -257,26 +243,30 @@ def neueste_pdf_finden(ordner: str) -> str | None:
     if not pdf_pfade:
         return None
 
-    neueste = max(pdf_pfade, key=lambda p: os.path.getmtime(p))
+    neueste = max(pdf_pfade, key=os.path.getmtime)
     return neueste
 
 
-def main() -> str | None:
+def main(pdf_pfad: str | None = None) -> str | None:
     os.makedirs(EINGANGS_ORDNER, exist_ok=True)
     os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
 
-    print("Base dir:", BASE_DIR)
-    print("Suche neueste PDF in:", EINGANGS_ORDNER)
+    if pdf_pfad is None:
+        print("Base dir:", BASE_DIR)
+        print("Suche neueste PDF in:", EINGANGS_ORDNER)
+        neueste_pdf = neueste_pdf_finden(EINGANGS_ORDNER)
 
-    neueste_pdf = neueste_pdf_finden(EINGANGS_ORDNER)
+        if neueste_pdf is None:
+            print("Keine PDF-Datei im Ordner gefunden.")
+            raise RuntimeError("Kein Gutachten gefunden. Laden Sie ein Gutachten hoch!")
 
-    if neueste_pdf is None:
-        print("Keine PDF-Datei im Ordner gefunden.")
-        raise RuntimeError("Kein Gutachten gefunden. Laden Sie ein Gutachten hoch!")
+        zu_verarbeitende_pdf = neueste_pdf
+    else:
+        zu_verarbeitende_pdf = pdf_pfad
 
-    print(f"Neueste PDF gefunden: {neueste_pdf}")
+    print(f"PDF wird verarbeitet: {zu_verarbeitende_pdf}")
 
-    voller_text = pdf_text_auslesen(neueste_pdf)
+    voller_text = pdf_text_auslesen(zu_verarbeitende_pdf)
     print("[DEBUG] Länge des vollen Gutachten-Textes:", len(voller_text), "Zeichen")
 
     if not voller_text or len(voller_text.strip()) < MIN_TEXT_CHARS:
@@ -297,7 +287,7 @@ def main() -> str | None:
 
     ki_antwort = ki_aufrufen(prompt)
 
-    basisname = os.path.splitext(os.path.basename(neueste_pdf))[0]
+    basisname = os.path.splitext(os.path.basename(zu_verarbeitende_pdf))[0]
     pfad_ki = ki_antwort_speichern(basisname, ki_antwort)
 
     print("Fertig. Diese eine PDF wurde verarbeitet.")
