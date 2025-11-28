@@ -10,10 +10,6 @@ import json
 from datetime import datetime
 from docxtpl import DocxTemplate
 
-# -------------------------
-# BASISPFAD & ORDNER
-# -------------------------
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 KI_ANTWORT_ORDNER = os.path.join(BASE_DIR, "ki_antworten")
@@ -24,15 +20,7 @@ JSON_START_MARKER = "JSON_START"
 JSON_END_MARKER = "JSON_END"
 
 
-# -------------------------
-# HILFSFUNKTIONEN
-# -------------------------
-
 def json_aus_ki_antwort_parsen(ki_text: str) -> dict:
-    """
-    Sucht in der KI-Antwort nach dem Bereich zwischen JSON_START und JSON_END
-    und parst diesen Bereich als JSON in ein Python-Dict.
-    """
     start_idx = ki_text.find(JSON_START_MARKER)
     end_idx = ki_text.find(JSON_END_MARKER)
 
@@ -53,9 +41,6 @@ def json_aus_ki_antwort_parsen(ki_text: str) -> dict:
 
 
 def euro_zu_float(text: str) -> float:
-    """
-    '5.200,00 €' -> 5200.0
-    """
     if not text:
         return 0.0
     t = text.strip()
@@ -68,23 +53,17 @@ def euro_zu_float(text: str) -> float:
 
 
 def float_zu_euro(betrag: float) -> str:
-    """
-    6580.0 -> '6.580,00 €'
-    """
     s = f"{betrag:,.2f}"   # '6,580.00'
     s = s.replace(",", "X").replace(".", ",").replace("X", ".")
     return s + " €"
 
 
 def daten_nachbearbeiten(daten: dict) -> dict:
-    """
-    Ergänzt / korrigiert Felder nach der KI:
-    - FAHRZEUG_KENNZEICHEN setzen, falls leer -> KENNZEICHEN verwenden
-    - KOSTENSUMME_X berechnen, falls leer
-    """
+    # Falls FAHRZEUG_KENNZEICHEN nicht gesetzt ist, fallback auf KENNZEICHEN
     if not daten.get("FAHRZEUG_KENNZEICHEN"):
         daten["FAHRZEUG_KENNZEICHEN"] = daten.get("KENNZEICHEN", "")
 
+    # KOSTENSUMME_X berechnen, falls leer
     if not daten.get("KOSTENSUMME_X"):
         rep = euro_zu_float(daten.get("REPARATURKOSTEN", ""))
         wm = euro_zu_float(daten.get("WERTMINDERUNG", ""))
@@ -98,29 +77,20 @@ def daten_nachbearbeiten(daten: dict) -> dict:
 
 
 def word_aus_vorlage_erstellen(daten: dict, vorlage_pfad: str, ziel_pfad: str):
-    """
-    Füllt die Word-Vorlage mit den Werten aus 'daten' und speichert sie.
-    """
     if not os.path.isfile(vorlage_pfad):
-        raise FileNotFoundError(
-            f"Word-Vorlage nicht gefunden: {vorlage_pfad}"
-        )
+        raise FileNotFoundError(f"Word-Vorlage nicht gefunden: {vorlage_pfad}")
 
     doc = DocxTemplate(vorlage_pfad)
-    doc.render(daten)
+    try:
+        doc.render(daten)
+    except Exception as e:
+        raise RuntimeError(f"Fehler beim Rendern der Word-Vorlage: {e}")
+
     os.makedirs(os.path.dirname(ziel_pfad), exist_ok=True)
     doc.save(ziel_pfad)
 
 
 def ki_datei_verarbeiten(pfad_ki_txt: str) -> str:
-    """
-    Verarbeitet EINE KI-Antwort:
-    - KI-Text lesen
-    - JSON-Daten extrahieren
-    - Daten nachbearbeiten
-    - Word-Dokument erstellen
-    - Pfad zur erzeugten .docx zurückgeben
-    """
     print(f"Verarbeite KI-Antwort: {pfad_ki_txt}")
 
     with open(pfad_ki_txt, "r", encoding="utf-8") as f:
@@ -141,10 +111,6 @@ def ki_datei_verarbeiten(pfad_ki_txt: str) -> str:
 
 
 def neueste_ki_datei_finden() -> str | None:
-    """
-    Sucht im KI_ANTWORT_ORDNER nach der neuesten *_ki.txt-Datei.
-    (Fallback, falls kein Pfad übergeben wurde)
-    """
     if not os.path.isdir(KI_ANTWORT_ORDNER):
         print("KI-Antwort-Ordner existiert nicht.")
         return None
@@ -164,10 +130,6 @@ def neueste_ki_datei_finden() -> str | None:
     return neueste
 
 
-# -------------------------
-# MAIN
-# -------------------------
-
 def main(pfad_ki_txt: str | None = None) -> str | None:
     """
     Wenn pfad_ki_txt angegeben ist, wird GENAU diese KI-Antwort verarbeitet.
@@ -177,7 +139,6 @@ def main(pfad_ki_txt: str | None = None) -> str | None:
     os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
     os.makedirs(AUSGANGS_ORDNER, exist_ok=True)
 
-    # 1. Pfad festlegen
     if pfad_ki_txt is None:
         pfad_ki_txt = neueste_ki_datei_finden()
         if pfad_ki_txt is None:
@@ -186,7 +147,6 @@ def main(pfad_ki_txt: str | None = None) -> str | None:
     if not os.path.isfile(pfad_ki_txt):
         raise FileNotFoundError(f"Angegebene KI-Datei existiert nicht: {pfad_ki_txt}")
 
-    # 2. Verarbeiten
     docx_pfad = ki_datei_verarbeiten(pfad_ki_txt)
     return docx_pfad
 
