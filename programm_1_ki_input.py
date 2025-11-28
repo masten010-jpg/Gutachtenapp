@@ -77,6 +77,8 @@ BESONDERS WICHTIGE FELDER (NICHT LEER LASSEN, WENN IM TEXT IRGENDWO ERWÄHNT):
    - Dieses Feld lässt du LEER ("").
    - Es wird vom System automatisch mit dem Datum der Verarbeitung/Upload gefüllt.
 
+9. Kostenpauschale: kosten die Pauschale sind bzw die mit pauschale gekennzeichnet werden, d.h. z.B. ...(pauschale).
+
 AUSGABEFORMAT:
 
 1. Zuerst eine gut lesbare Stichpunktliste im folgenden Schema:
