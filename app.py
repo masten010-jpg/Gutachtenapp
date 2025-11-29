@@ -26,7 +26,7 @@ st.set_page_config(page_title="Kfz-Gutachten → Anwaltsschreiben", layout="cent
 # ==========================
 
 # HIER Passwort einstellen
-x = "dein_sicheres_passwort"  # <- anpassen
+x = "123passwort"  # <- anpassen
 
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
