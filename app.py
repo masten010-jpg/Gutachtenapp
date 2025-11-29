@@ -22,11 +22,11 @@ os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
 st.set_page_config(page_title="Kfz-Gutachten → Anwaltsschreiben", layout="centered")
 
 # ==========================
-# Einfacher Passwortschutz
+# Passwortschutz
 # ==========================
 
 # HIER Passwort einstellen
-x = "123passwort"  # <- anpassen
+x = "passwort123"  # <- nach Wunsch ändern
 
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
@@ -34,14 +34,20 @@ if "logged_in" not in st.session_state:
 if not st.session_state["logged_in"]:
     st.title("Zugang geschützt")
     pw = st.text_input("Passwort eingeben", type="password")
+    login_clicked = st.button("Login")
 
-    # Sofortiges Prüfen – kein Button nötig
-    if pw == x:
-        st.session_state["logged_in"] = True
-    elif pw != "":
+    # Noch nicht geklickt → nur Maske anzeigen
+    if not login_clicked:
+        st.stop()
+
+    # Button geklickt, Passwort falsch
+    if pw != x:
         st.error("Falsches Passwort.")
+        st.stop()
 
-    st.stop()
+    # Passwort korrekt → Status setzen und neu starten
+    st.session_state["logged_in"] = True
+    st.rerun()
 
 # ==========================
 # App-Inhalt (nur nach Login)
@@ -53,10 +59,10 @@ st.write(
     "Anwaltsschreiben als Word-Datei erhalten."
 )
 
-# Optional: Logout-Button
+# Optional: Logout
 if st.button("Logout"):
     st.session_state["logged_in"] = False
-    st.stop()
+    st.rerun()
 
 
 def cleanup_files(*paths: str):
