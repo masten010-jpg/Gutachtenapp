@@ -7,15 +7,44 @@ import streamlit as st
 import programm_1_ki_input
 import programm_2_word_output
 
-# Basisordner = dieser Dateiort
+# ==========================
+# Basis-Setup / Pfade
+# ==========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EINGANGS_ORDNER = os.path.join(BASE_DIR, "eingang_gutachten")
 AUSGANGS_ORDNER = os.path.join(BASE_DIR, "ausgang_schreiben")
+KI_ANTWORT_ORDNER = os.path.join(BASE_DIR, "ki_antworten")
 
 os.makedirs(EINGANGS_ORDNER, exist_ok=True)
 os.makedirs(AUSGANGS_ORDNER, exist_ok=True)
+os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
 
 st.set_page_config(page_title="Kfz-Gutachten → Anwaltsschreiben", layout="centered")
+
+# ==========================
+# Einfacher Passwortschutz
+# ==========================
+
+# Passwort flexibel über Variable x
+x = "deinelosung1234"  # <- hier nach Bedarf ändern
+
+if "auth_ok" not in st.session_state:
+    st.session_state["auth_ok"] = False
+
+if not st.session_state["auth_ok"]:
+    st.title("Zugang geschützt")
+    pw = st.text_input("Passwort eingeben", type="password")
+    if st.button("Login"):
+        if pw == x:
+            st.session_state["auth_ok"] = True
+            st.experimental_rerun()
+        else:
+            st.error("Falsches Passwort.")
+    st.stop()
+
+# ==========================
+# App-Inhalt (nur nach Login)
+# ==========================
 
 st.title("Kfz-Gutachten Automatisierung")
 st.write(
@@ -23,11 +52,22 @@ st.write(
     "Anwaltsschreiben als Word-Datei erhalten."
 )
 
+
+def cleanup_files(*paths: str):
+    for path in paths:
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+                print(f"Gelöscht: {path}")
+            except OSError as e:
+                print(f"Fehler beim Löschen von {path}: {e}")
+
+
 # --------------------------------------------------
-# 1) Upload + Verarbeiten
+# 1) Upload + Verarbeiten + Download + Löschen
 # --------------------------------------------------
 
-st.header("1. Gutachten hochladen und verarbeiten")
+st.header("1. Gutachten hochladen, verarbeiten und Schreiben herunterladen")
 
 uploaded_file = st.file_uploader("Gutachten als PDF hochladen", type=["pdf"])
 
@@ -66,9 +106,25 @@ if st.button("Gutachten verarbeiten"):
                             "Programm 2 hat kein Schreiben erzeugt."
                         )
 
-                st.success(
-                    "Verarbeitung abgeschlossen. Das Schreiben kann jetzt "
-                    "unter Punkt 2 heruntergeladen werden."
+                # Word-Datei in Speicher laden, bevor wir sie löschen
+                with open(docx_pfad, "rb") as f:
+                    docx_bytes = f.read()
+
+                # Dateien vom Server löschen (PDF, KI-Text, DOCX)
+                cleanup_files(pdf_path, pfad_ki, docx_pfad)
+
+                st.success("Verarbeitung abgeschlossen.")
+                st.success("Alle Daten wurden gelöscht!")
+
+                # Download-Button mit in-memory Bytes
+                st.download_button(
+                    label="Erstelltes Anwaltsschreiben herunterladen",
+                    data=docx_bytes,
+                    file_name=os.path.basename(docx_pfad),
+                    mime=(
+                        "application/vnd.openxmlformats-officedocument."
+                        "wordprocessingml.document"
+                    ),
                 )
 
             except Exception as e:
@@ -76,60 +132,24 @@ if st.button("Gutachten verarbeiten"):
 
 
 # --------------------------------------------------
-# 2) Download der neuesten Word-Datei
-# --------------------------------------------------
-
-st.header("2. Letztes Anwaltsschreiben herunterladen")
-
-neueste_docx = None
-if os.path.isdir(AUSGANGS_ORDNER):
-    files = [
-        os.path.join(AUSGANGS_ORDNER, d)
-        for d in os.listdir(AUSGANGS_ORDNER)
-        if d.lower().endswith(".docx")
-    ]
-    if files:
-        neueste_docx = max(files, key=os.path.getmtime)
-
-if neueste_docx:
-    st.write(f"Aktuellste Datei: **{os.path.basename(neueste_docx)}**")
-    with open(neueste_docx, "rb") as f:
-        st.download_button(
-            label="Neueste Word-Datei herunterladen",
-            data=f,
-            file_name=os.path.basename(neueste_docx),
-            mime=(
-                "application/vnd.openxmlformats-officedocument."
-                "wordprocessingml.document"
-            ),
-        )
-else:
-    st.info("Noch keine Word-Datei erzeugt. Bitte zuerst ein Gutachten verarbeiten.")
-
-
-# --------------------------------------------------
-# 3) Debug-Infos (optional)
+# 2) Debug-Infos (optional)
 # --------------------------------------------------
 
 with st.expander("Debug: Dateien im System anzeigen"):
-    ki_ordner = os.path.join(BASE_DIR, "ki_antworten")
-    out_ordner = AUSGANGS_ORDNER
-    in_ordner = EINGANGS_ORDNER
-
     st.subheader("Eingang Gutachten (eingang_gutachten)")
-    if os.path.isdir(in_ordner):
-        st.write(os.listdir(in_ordner))
+    if os.path.isdir(EINGANGS_ORDNER):
+        st.write(os.listdir(EINGANGS_ORDNER))
     else:
         st.write("Ordner existiert nicht.")
 
     st.subheader("KI-Antworten (ki_antworten)")
-    if os.path.isdir(ki_ordner):
-        st.write(os.listdir(ki_ordner))
+    if os.path.isdir(KI_ANTWORT_ORDNER):
+        st.write(os.listdir(KI_ANTWORT_ORDNER))
     else:
         st.write("Ordner existiert nicht.")
 
     st.subheader("Ausgang-Schreiben (ausgang_schreiben)")
-    if os.path.isdir(out_ordner):
-        st.write(os.listdir(out_ordner))
+    if os.path.isdir(AUSGANGS_ORDNER):
+        st.write(os.listdir(AUSGANGS_ORDNER))
     else:
         st.write("Ordner existiert nicht.")
