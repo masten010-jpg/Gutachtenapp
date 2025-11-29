@@ -26,7 +26,7 @@ st.set_page_config(page_title="Kfz-Gutachten → Anwaltsschreiben", layout="cent
 # ==========================
 
 # Passwort flexibel über Variable x
-x = "deinelosung1234"  # <- hier nach Bedarf ändern
+x = "dein_sicheres_passwort"  # <- hier nach Bedarf ändern
 
 if "auth_ok" not in st.session_state:
     st.session_state["auth_ok"] = False
@@ -37,7 +37,7 @@ if not st.session_state["auth_ok"]:
     if st.button("Login"):
         if pw == x:
             st.session_state["auth_ok"] = True
-            st.experimental_rerun()
+            st.rerun()  # <- statt st.experimental_rerun()
         else:
             st.error("Falsches Passwort.")
     st.stop()
