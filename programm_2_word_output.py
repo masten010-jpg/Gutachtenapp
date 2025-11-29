@@ -24,6 +24,13 @@ def json_aus_ki_antwort_parsen(ki_text: str) -> dict:
 
     json_roh = ki_text[start_idx + len(JSON_START_MARKER):end_idx].strip()
 
+    # KI kann sowas schreiben wie:
+    # JSON_START
+    # ```json
+    # { ... }
+    # ```
+    # JSON_END
+    # → wir extrahieren nur den Teil zwischen der ersten und letzten Klammer
     first_brace = json_roh.find("{")
     last_brace = json_roh.rfind("}")
 
@@ -46,6 +53,11 @@ def json_aus_ki_antwort_parsen(ki_text: str) -> dict:
 
 
 def euro_zu_float(text) -> float:
+    """
+    Robust: versteht EU-Format (1.234,56), US-Format (1,234.56) und reine Zahlen.
+    Wenn gar keine Ziffern drin sind → 0.0
+    """
+    # Falls die KI direkt eine Zahl liefert
     if isinstance(text, (int, float)):
         return float(text)
 
@@ -56,6 +68,7 @@ def euro_zu_float(text) -> float:
     if not t:
         return 0.0
 
+    # Währungsangaben entfernen
     t = (
         t.replace("€", "")
          .replace("EUR", "")
@@ -63,26 +76,36 @@ def euro_zu_float(text) -> float:
          .replace("Euro", "")
     )
 
+    # erste Zahl mit Punkt/Komma suchen
     match = re.search(r'-?[\d\.,]+', t)
     if not match:
+        # keine Ziffern → keine Zahl
         return 0.0
 
     num = match.group(0)
 
+    # Fall 1: Komma und Punkt vorhanden
     if "," in num and "." in num:
         last_comma = num.rfind(",")
         last_dot = num.rfind(".")
 
         if last_comma > last_dot:
+            # Format wie 1.234,56  → . = Tausender, , = Dezimal
             num = num.replace(".", "").replace(",", ".")
         else:
+            # Format wie 1,234.56  → , = Tausender, . = Dezimal
             num = num.replace(",", "")
 
+    # Fall 2: nur Komma → Komma als Dezimal, Punkt als Tausender
     elif "," in num:
         num = num.replace(".", "").replace(",", ".")
+
+    # Fall 3: nur Punkt
     else:
+        # mehrere Punkte → eher Tausendertrennzeichen
         if num.count(".") > 1:
             num = num.replace(".", "")
+        # ein Punkt → Dezimalpunkt, lassen wir so
 
     try:
         return float(num)
@@ -91,7 +114,7 @@ def euro_zu_float(text) -> float:
 
 
 def float_zu_euro(betrag: float) -> str:
-    s = f"{betrag:,.2f}"
+    s = f"{betrag:,.2f}"   # '6,580.00'
     s = s.replace(",", "X").replace(".", ",").replace("X", ".")
     return s + " €"
 
@@ -127,24 +150,9 @@ def baue_standard_schadenhergang(daten: dict) -> str:
     return " ".join([s1, s2, s3])
 
 
-def extrahiere_schadensnummer_aus_ki_text(ki_text: str) -> str | None:
-    for raw_line in ki_text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-
-        lower = line.lower()
-        if "schadensnummer" in lower:
-            parts = line.split(":", 1)
-            if len(parts) == 2:
-                wert = parts[1].strip()
-                if wert and wert.lower() not in ("", "nicht bekannt", '""'):
-                    return wert
-
-    return None
-
-
 def daten_nachbearbeiten(daten: dict) -> dict:
+    # Wichtig: Kostenfelder NICHT hier per setdefault anlegen,
+    # damit wir unterscheiden können „Feld fehlt“ vs. „Feld ist da“.
     alle_keys = [
         "MANDANT_VORNAME", "MANDANT_NACHNAME", "MANDANT_NAME",
         "MANDANT_STRASSE", "MANDANT_PLZ_ORT",
@@ -152,25 +160,13 @@ def daten_nachbearbeiten(daten: dict) -> dict:
         "FAHRZEUGTYP", "KENNZEICHEN", "FAHRZEUG_KENNZEICHEN",
         "POLIZEIAKTE_NUMMER", "SCHADENSNUMMER", "AKTENZEICHEN",
         "SCHADENHERGANG",
+        # Kostenfelder bewusst NICHT hier:
+        # "REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN",
         "KOSTENSUMME_X",
         "FRIST_DATUM", "HEUTDATUM",
     ]
     for k in alle_keys:
         daten.setdefault(k, "")
-
-    if not (daten.get("SCHADENSNUMMER") or "").strip():
-        vs_alias_keys = [
-            "VS_NR",
-            "VSNR",
-            "VERSICHERUNGSNUMMER",
-            "Versicherungsnummer",
-            "VSNUMMER",
-        ]
-        for alias in vs_alias_keys:
-            val = daten.get(alias)
-            if val and str(val).strip():
-                daten["SCHADENSNUMMER"] = str(val).strip()
-                break
 
     text_felder_mit_fallback = [
         "MANDANT_VORNAME", "MANDANT_NACHNAME", "MANDANT_NAME",
@@ -181,11 +177,16 @@ def daten_nachbearbeiten(daten: dict) -> dict:
     ]
     for feld in text_felder_mit_fallback:
         if not (daten.get(feld) or "").strip():
-            daten[feld] = "nicht bekannt"
+            if feld == "SCHADENSNUMMER":
+                # Spezieller Fallback für Schadensnummer
+                daten[feld] = 'Versicherungsnummer ("VS_Nr" tages)'
+            else:
+                daten[feld] = "nicht bekannt"
 
     if not (daten.get("FAHRZEUG_KENNZEICHEN") or "").strip():
         daten["FAHRZEUG_KENNZEICHEN"] = daten.get("KENNZEICHEN", "nicht bekannt")
 
+    # Geldfelder: hier unterscheiden wir jetzt sauber
     geld_felder = ["REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN"]
     geld_werte = {}
 
@@ -193,9 +194,11 @@ def daten_nachbearbeiten(daten: dict) -> dict:
         roh = daten.get(feld, None)
 
         if roh is None:
+            # Feld war im JSON GAR NICHT enthalten → „kommt im Gutachten nicht vor“
             betrag = 0.0
             daten[feld] = float_zu_euro(betrag)
         else:
+            # Feld existiert (egal ob Zahl oder Text) → versuchen zu interpretieren
             betrag = euro_zu_float(roh)
             daten[feld] = float_zu_euro(betrag)
 
@@ -239,13 +242,6 @@ def ki_datei_verarbeiten(pfad_ki_txt: str) -> str:
         ki_text = f.read()
 
     daten = json_aus_ki_antwort_parsen(ki_text)
-
-    if not (daten.get("SCHADENSNUMMER") or "").strip():
-        sn = extrahiere_schadensnummer_aus_ki_text(ki_text)
-        if sn:
-            print(f"[INFO] Schadensnummer aus Stichpunktliste übernommen: {sn}")
-            daten["SCHADENSNUMMER"] = sn
-
     daten = daten_nachbearbeiten(daten)
 
     basisname = os.path.splitext(os.path.basename(pfad_ki_txt))[0]
