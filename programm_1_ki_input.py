@@ -12,7 +12,8 @@ KI_ANTWORT_ORDNER = os.path.join(BASE_DIR, "ki_antworten")
 
 GEMINI_MODEL = "gemini-2.5-flash"
 
-MAX_TEXT_CHARS = 8000
+# Erhöht, damit der obere Teil mit VS-Nr sicher drin ist.
+MAX_TEXT_CHARS = 100000
 KI_MAX_RETRIES = 3
 KI_TIMEOUT_SEKUNDEN = 60
 MIN_TEXT_CHARS = 6000
@@ -59,14 +60,15 @@ BESONDERS WICHTIGE FELDER (NICHT LEER LASSEN, WENN IM TEXT IRGENDWO ERWÄHNT):
    - Suche nach Angaben wie "Schadensnummer", "Schaden-Nr.", "Schaden-Nr", "Schaden-Nummer".
    - Berücksichtige außerdem Bezeichnungen wie:
      "Versicherungsnummer", "Versicherungsschein-Nr.", "VS-Nr", "VS_Nr", "VS Nr.", "VSNR".
-   - Wenn eine dieser Nummern im Zusammenhang mit der Versicherung / Regulierung steht,
-     behandle sie als SCHADENSNUMMER und trage sie dort ein.
+   - WICHTIGE PRIORITÄT:
+     a) Wenn sowohl eine "Schadensnummer / Schaden-Nr." als auch eine "Versicherungsnummer / VS-Nr / Versicherungsschein-Nr." genannt sind:
+        - Verwende ALS SCHADENSNUMMER NUR die "Schadensnummer / Schaden-Nr.".
+     b) Wenn KEINE eigenständige "Schadensnummer / Schaden-Nr." genannt ist,
+        aber eine "Versicherungsnummer / VS-Nr / Versicherungsschein-Nr." vorhanden ist:
+        - Verwende diese Nummer als SCHADENSNUMMER.
    - Gib die Nummer EXAKT so zurück, wie sie im Text steht (inkl. / - . / etc.).
    - Wenn wirklich keine passende Nummer erkennbar ist, setze SCHADENSNUMMER auf "" (leer)
      und erfinde nichts.
-
-
-
 
 7. AKTENZEICHEN:
    - Suche nach "Aktenzeichen", "Az.", "AZ:" außerhalb des Polizeikontexts, z.B. als internes Aktenzeichen, Kanzlei- oder Gerichtszeichen.
@@ -77,7 +79,9 @@ BESONDERS WICHTIGE FELDER (NICHT LEER LASSEN, WENN IM TEXT IRGENDWO ERWÄHNT):
    - Dieses Feld lässt du LEER ("").
    - Es wird vom System automatisch mit dem Datum der Verarbeitung/Upload gefüllt.
 
-9. Kostenpauschale: kosten die Pauschale sind bzw die mit pauschale gekennzeichnet werden, d.h. z.B. Fahrkosten- bzw. Porto und Telefon(pauschale).
+9. Kostenpauschale:
+   - Hierunter fallen pauschale Kosten wie Fahrkostenpauschale, Porto- und Telefonpauschale
+     oder ähnlich bezeichnete Pauschalbeträge.
 
 AUSGABEFORMAT:
 
@@ -117,11 +121,12 @@ AUSGABEFORMAT:
    - Innerhalb dieser Marker nur gültiges JSON, KEINE Kommentare, KEINE Erklärung.
    - Strings immer in Anführungszeichen.
    - Verwende GENAU die folgenden Keys (nicht mehr, nicht weniger).
-   WICHTIGER HINWEIS:
-- Achte besonders darauf, dass das Feld "SCHADENSNUMMER" ausgefüllt wird,
-  wenn irgendwo im Gutachten eine Versicherungsnummer / VS-Nr / Schaden-Nr o.ä. genannt ist.
-- Wenn eine solche Nummer vorhanden ist, darf "SCHADENSNUMMER" NICHT leer bleiben.
 
+WICHTIGER HINWEIS:
+- Achte besonders darauf, dass das Feld "SCHADENSNUMMER" ausgefüllt wird,
+  wenn irgendwo im Gutachten eine Schadensnummer / Schaden-Nr. oder eine Versicherungsnummer / VS-Nr
+  im Zusammenhang mit der Regulierung genannt ist.
+- Wenn eine solche Nummer vorhanden ist, darf "SCHADENSNUMMER" NICHT leer bleiben.
 
 JSON-FORMAT (verwende GENAU diese Keys):
 
