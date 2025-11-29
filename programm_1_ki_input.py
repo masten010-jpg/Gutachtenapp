@@ -15,7 +15,7 @@ GEMINI_MODEL = "gemini-2.5-flash"
 MAX_TEXT_CHARS = 8000
 KI_MAX_RETRIES = 3
 KI_TIMEOUT_SEKUNDEN = 60
-MIN_TEXT_CHARS = 500
+MIN_TEXT_CHARS = 6000
 
 PROMPT_TEMPLATE = """
 Du bist eine spezialisierte KI für die Auswertung von deutschsprachigen Kfz-Schadensgutachten.
@@ -77,7 +77,7 @@ BESONDERS WICHTIGE FELDER (NICHT LEER LASSEN, WENN IM TEXT IRGENDWO ERWÄHNT):
    - Dieses Feld lässt du LEER ("").
    - Es wird vom System automatisch mit dem Datum der Verarbeitung/Upload gefüllt.
 
-9. Kostenpauschale: kosten die Pauschale sind bzw die mit pauschale gekennzeichnet werden, d.h. z.B. ...(pauschale).
+9. Kostenpauschale: kosten die Pauschale sind bzw die mit pauschale gekennzeichnet werden, d.h. z.B. Fahrkosten- bzw. Porto und Telefon(pauschale).
 
 AUSGABEFORMAT:
 
