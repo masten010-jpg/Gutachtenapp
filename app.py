@@ -25,28 +25,22 @@ st.set_page_config(page_title="Kfz-Gutachten → Anwaltsschreiben", layout="cent
 # Einfacher Passwortschutz
 # ==========================
 
-# Passwort flexibel über Variable x
-x = "deinelosung123"  # <- hier nach Bedarf ändern
+# HIER Passwort einstellen
+x = "dein_sicheres_passwort"  # <- anpassen
 
-# Session-Init
-if "auth_ok" not in st.session_state:
-    st.session_state["auth_ok"] = False
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
 
-# Wenn Passwort geändert wurde → alle ausloggen
-if st.session_state.get("pw_version") != x:
-    st.session_state["auth_ok"] = False
-    st.session_state["pw_version"] = x
-
-# Login-Gate
-if not st.session_state["auth_ok"]:
+if not st.session_state["logged_in"]:
     st.title("Zugang geschützt")
     pw = st.text_input("Passwort eingeben", type="password")
-    if st.button("Login"):
-        if pw == x:
-            st.session_state["auth_ok"] = True
-            st.success("Login erfolgreich. Seite bitte einmal neu laden, falls nötig.")
-        else:
-            st.error("Falsches Passwort.")
+
+    # Sofortiges Prüfen – kein Button nötig
+    if pw == x:
+        st.session_state["logged_in"] = True
+    elif pw != "":
+        st.error("Falsches Passwort.")
+
     st.stop()
 
 # ==========================
@@ -61,7 +55,7 @@ st.write(
 
 # Optional: Logout-Button
 if st.button("Logout"):
-    st.session_state["auth_ok"] = False
+    st.session_state["logged_in"] = False
     st.stop()
 
 
@@ -87,7 +81,6 @@ if st.button("Gutachten verarbeiten"):
     if uploaded_file is None:
         st.error("Bitte zuerst eine PDF-Datei hochladen.")
     else:
-        # PDF speichern
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_name = f"gutachten_{timestamp}.pdf"
         pdf_path = os.path.join(EINGANGS_ORDNER, safe_name)
