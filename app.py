@@ -31,7 +31,7 @@ st.header("1. Gutachten hochladen und verarbeiten")
 
 uploaded_file = st.file_uploader("Gutachten als PDF hochladen", type=["pdf"])
 
-if st.button("Gutachten verarbeiten (Programm 1 + Programm 2)"):
+if st.button("Gutachten verarbeiten"):
     if uploaded_file is None:
         st.error("Bitte zuerst eine PDF-Datei hochladen.")
     else:
