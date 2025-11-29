@@ -3,6 +3,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from docxtpl import DocxTemplate
+import re
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -51,29 +52,65 @@ def json_aus_ki_antwort_parsen(ki_text: str) -> dict:
     return daten
 
 
-import re
+def euro_zu_float(text) -> float:
+    """
+    Robust: versteht EU-Format (1.234,56), US-Format (1,234.56) und reine Zahlen.
+    Wenn gar keine Ziffern drin sind → 0.0
+    """
+    # Falls die KI direkt eine Zahl liefert
+    if isinstance(text, (int, float)):
+        return float(text)
 
-def euro_zu_float(text: str) -> float:
-    if not text:
+    if text is None:
         return 0.0
 
-    t = text.strip()
-    # Erste Zahl im Text finden (inkl. Tausenderpunkt und Komma)
-    match = re.search(r'-?[\d\.\,]+', t)
+    t = str(text).strip()
+    if not t:
+        return 0.0
+
+    # Währungsangaben entfernen
+    t = (
+        t.replace("€", "")
+         .replace("EUR", "")
+         .replace("eur", "")
+         .replace("Euro", "")
+    )
+
+    # erste Zahl mit Punkt/Komma suchen
+    match = re.search(r'-?[\d\.,]+', t)
     if not match:
+        # keine Ziffern → keine Zahl
         return 0.0
 
-    number_str = match.group(0)
+    num = match.group(0)
 
-    # Tausenderpunkte entfernen, Komma in Punkt umwandeln
-    number_str = number_str.replace("€", "").replace("EUR", "").strip()
-    number_str = number_str.replace(".", "").replace(",", ".")
+    # Fall 1: Komma und Punkt vorhanden
+    if "," in num and "." in num:
+        last_comma = num.rfind(",")
+        last_dot = num.rfind(".")
+
+        if last_comma > last_dot:
+            # Format wie 1.234,56  → . = Tausender, , = Dezimal
+            num = num.replace(".", "").replace(",", ".")
+        else:
+            # Format wie 1,234.56  → , = Tausender, . = Dezimal
+            num = num.replace(",", "")
+
+    # Fall 2: nur Komma → Komma als Dezimal, Punkt als Tausender
+    elif "," in num:
+        num = num.replace(".", "").replace(",", ".")
+
+    # Fall 3: nur Punkt
+    else:
+        # mehrere Punkte → eher Tausendertrennzeichen
+        if num.count(".") > 1:
+            num = num.replace(".", "")
+        # ein Punkt → Dezimalpunkt, lassen wir so
 
     try:
-        return float(number_str)
+        return float(num)
     except ValueError:
         return 0.0
-
 
 
 def float_zu_euro(betrag: float) -> str:
@@ -114,6 +151,8 @@ def baue_standard_schadenhergang(daten: dict) -> str:
 
 
 def daten_nachbearbeiten(daten: dict) -> dict:
+    # Wichtig: Kostenfelder NICHT hier per setdefault anlegen,
+    # damit wir unterscheiden können „Feld fehlt“ vs. „Feld ist da“.
     alle_keys = [
         "MANDANT_VORNAME", "MANDANT_NACHNAME", "MANDANT_NAME",
         "MANDANT_STRASSE", "MANDANT_PLZ_ORT",
@@ -121,7 +160,8 @@ def daten_nachbearbeiten(daten: dict) -> dict:
         "FAHRZEUGTYP", "KENNZEICHEN", "FAHRZEUG_KENNZEICHEN",
         "POLIZEIAKTE_NUMMER", "SCHADENSNUMMER", "AKTENZEICHEN",
         "SCHADENHERGANG",
-        "REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN",
+        # Kostenfelder bewusst NICHT hier:
+        # "REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN",
         "KOSTENSUMME_X",
         "FRIST_DATUM", "HEUTDATUM",
     ]
@@ -143,17 +183,26 @@ def daten_nachbearbeiten(daten: dict) -> dict:
             else:
                 daten[feld] = "nicht bekannt"
 
-
     if not (daten.get("FAHRZEUG_KENNZEICHEN") or "").strip():
         daten["FAHRZEUG_KENNZEICHEN"] = daten.get("KENNZEICHEN", "nicht bekannt")
 
+    # Geldfelder: hier unterscheiden wir jetzt sauber
     geld_felder = ["REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN"]
     geld_werte = {}
+
     for feld in geld_felder:
-        roh = (daten.get(feld) or "").strip()
-        betrag = euro_zu_float(roh)
+        roh = daten.get(feld, None)
+
+        if roh is None:
+            # Feld war im JSON GAR NICHT enthalten → „kommt im Gutachten nicht vor“
+            betrag = 0.0
+            daten[feld] = float_zu_euro(betrag)
+        else:
+            # Feld existiert (egal ob Zahl oder Text) → versuchen zu interpretieren
+            betrag = euro_zu_float(roh)
+            daten[feld] = float_zu_euro(betrag)
+
         geld_werte[feld] = betrag
-        daten[feld] = float_zu_euro(betrag)
 
     gesamt = sum(geld_werte.values())
     daten["KOSTENSUMME_X"] = float_zu_euro(gesamt)
@@ -243,5 +292,3 @@ def main(pfad_ki_txt: str | None = None) -> str | None:
 
 if __name__ == "__main__":
     main()
-
-
