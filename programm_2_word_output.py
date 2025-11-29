@@ -168,6 +168,21 @@ def daten_nachbearbeiten(daten: dict) -> dict:
     for k in alle_keys:
         daten.setdefault(k, "")
 
+    # Alias-Mapping für SCHADENSNUMMER / VS-Nr, bevor Fallback greift
+    if not (daten.get("SCHADENSNUMMER") or "").strip():
+        vs_alias_keys = [
+            "VS_NR",
+            "VSNR",
+            "VERSICHERUNGSNUMMER",
+            "Versicherungsnummer",
+            "VSNUMMER",
+        ]
+        for alias in vs_alias_keys:
+            val = daten.get(alias)
+            if val and str(val).strip():
+                daten["SCHADENSNUMMER"] = str(val).strip()
+                break
+
     text_felder_mit_fallback = [
         "MANDANT_VORNAME", "MANDANT_NACHNAME", "MANDANT_NAME",
         "MANDANT_STRASSE", "MANDANT_PLZ_ORT",
