@@ -4,336 +4,124 @@ import json
 import re
 from datetime import datetime, timedelta
 from docxtpl import DocxTemplate
+from programm_1_ki_input import KI_ANTWORT_ORDNER, BASE_DIR, VORLAGE_PFAD
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-KI_ANTWORT_ORDNER = os.path.join(BASE_DIR, "ki_antworten")
 AUSGANGS_ORDNER = os.path.join(BASE_DIR, "ausgang_schreiben")
-VORLAGE_PFAD = os.path.join(BASE_DIR, "vorlage_schreiben.docx")
-
 JSON_START_MARKER = "JSON_START"
 JSON_END_MARKER = "JSON_END"
-
 
 def json_aus_ki_antwort_parsen(ki_text: str) -> dict:
     start_idx = ki_text.find(JSON_START_MARKER)
     end_idx = ki_text.find(JSON_END_MARKER)
-
     if start_idx == -1 or end_idx == -1:
-        raise ValueError("JSON_START oder JSON_END nicht gefunden in KI-Antwort.")
-
+        raise ValueError("JSON_START oder JSON_END nicht gefunden.")
     json_roh = ki_text[start_idx + len(JSON_START_MARKER):end_idx].strip()
-
     first_brace = json_roh.find("{")
     last_brace = json_roh.rfind("}")
-
     if first_brace == -1 or last_brace == -1 or first_brace >= last_brace:
-        raise ValueError(
-            "Kein gültiger JSON-Block ({}-Klammern) in KI-Antwort gefunden.\n"
-            f"Auszug: {json_roh[:300]}"
-        )
-
+        raise ValueError("Kein gültiger JSON-Block in KI-Antwort.")
     json_clean = json_roh[first_brace:last_brace + 1]
-
-    try:
-        daten = json.loads(json_clean)
-    except json.JSONDecodeError as e:
-        raise ValueError(
-            f"JSON konnte nicht geparst werden: {e}\nAuszug: {json_clean[:500]}"
-        ) from e
-
-    return daten
-
+    return json.loads(json_clean)
 
 def euro_zu_float(text) -> float:
     if isinstance(text, (int, float)):
         return float(text)
-
-    if text is None:
+    if not text:
         return 0.0
-
-    t = str(text).strip()
-    if not t:
-        return 0.0
-
-    t = (
-        t.replace("€", "")
-        .replace("EUR", "")
-        .replace("eur", "")
-        .replace("Euro", "")
-    )
-
-    match = re.search(r"-?[\d\.,]+", t)
-    if not match:
-        return 0.0
-
-    num = match.group(0)
-
-    if "," in num and "." in num:
-        last_comma = num.rfind(",")
-        last_dot = num.rfind(".")
-        if last_comma > last_dot:
-            num = num.replace(".", "").replace(",", ".")
-        else:
-            num = num.replace(",", "")
-    elif "," in num:
-        num = num.replace(".", "").replace(",", ".")
-    else:
-        if num.count(".") > 1:
-            num = num.replace(".", "")
-
+    t = str(text).replace("€", "").replace("EUR", "").replace("Euro", "").replace(" ", "")
+    t = t.replace(".", "").replace(",", ".") if "," in t else t
     try:
-        return float(num)
+        return float(t)
     except ValueError:
         return 0.0
 
-
 def float_zu_euro(betrag: float) -> str:
-    s = f"{betrag:,.2f}"
-    s = s.replace(",", "X").replace(".", ",").replace("X", ".")
+    s = f"{betrag:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return s + " €"
 
+def extrahiere_platzhalter(vorlage_pfad):
+    doc = DocxTemplate(vorlage_pfad)
+    return doc.get_undeclared_template_variables()
 
-def baue_standard_schadenhergang(daten: dict) -> str:
-    datum = (daten.get("UNFALL_DATUM") or "").strip()
-    ort = (daten.get("UNFALLORT") or "").strip()
-    strasse = (daten.get("UNFALL_STRASSE") or "").strip()
+def baue_totalschaden(daten, platzhalter):
+    if "WIEDERBESCHAFFUNGSWERTAUFWAND" in platzhalter:
+        wbw = euro_zu_float(daten.get("WIEDERBESCHAFFUNGSWERT", 0))
+        restwert = euro_zu_float(daten.get("RESTWERT", 0))
+        wiederbeschaffungsaufwand = wbw - restwert
+        daten["WIEDERBESCHAFFUNGSWERTAUFWAND"] = float_zu_euro(wiederbeschaffungsaufwand)
+    return daten
 
-    if datum:
-        s1 = f"Am {datum} ereignete sich"
-    else:
-        s1 = "Es ereignete sich"
-
-    if ort and strasse:
-        s1 += f" in {ort}, {strasse} ein Verkehrsunfall, an dem unser Mandant beteiligt war."
-    elif ort:
-        s1 += f" in {ort} ein Verkehrsunfall, an dem unser Mandant beteiligt war."
-    elif strasse:
-        s1 += f" in der {strasse} ein Verkehrsunfall, an dem unser Mandant beteiligt war."
-    else:
-        s1 += " ein Verkehrsunfall, an dem unser Mandant beteiligt war."
-
-    s2 = (
-        "Die näheren Umstände des Schadenhergangs ergeben sich aus dem beigefügten "
-        "Kfz-Schadengutachten."
-    )
-    s3 = (
-        "Zur Vermeidung von Wiederholungen nehmen wir auf die dortigen Ausführungen "
-        "vollumfänglich Bezug."
-    )
-
-    return " ".join([s1, s2, s3])
-
-
-def normalisiere_schadensnummer_aus_text(raw: str) -> str:
-    if not raw:
-        return ""
-
-    s = raw.strip()
-
-    if ":" in s:
-        s = s.split(":", 1)[1].strip()
-
-    m = re.search(r"[A-Za-z0-9][A-Za-z0-9\-/\. ]*", s)
-    if m:
-        return m.group(0).strip()
-
-    return s
-
-
-def setze_schadensnummer(daten: dict, ki_text: str) -> None:
-    kandidat_felder = [
-        "SCHADENSNUMMER",
-        "VERSICHERUNGSNUMMER",
-        "Versicherungsnummer",
-        "VS_NR",
-        "VSNR",
-        "VSNUMMER",
-    ]
-
-    wert = ""
-    for feld in kandidat_felder:
-        val = (daten.get(feld) or "").strip()
-        if val:
-            wert = val
-            break
-
-    if not wert:
-        for raw_line in ki_text.splitlines():
-            line = raw_line.strip()
-            if not line:
-                continue
-            lower = line.lower()
-            if "schadensnummer" in lower or "versicherungsnummer" in lower or "vs-nr" in lower or "vs nr" in lower:
-                parts = line.split(":", 1)
-                if len(parts) == 2:
-                    candidate = parts[1].strip()
-                else:
-                    candidate = line
-                wert = candidate
-                break
-
-    daten["SCHADENSNUMMER"] = normalisiere_schadensnummer_aus_text(wert)
-
-
-def daten_nachbearbeiten(daten: dict) -> dict:
-    alle_keys = [
-        "MANDANT_VORNAME",
-        "MANDANT_NACHNAME",
-        "MANDANT_NAME",
-        "MANDANT_STRASSE",
-        "MANDANT_PLZ_ORT",
-        "UNFALL_DATUM",
-        "UNFALL_UHRZEIT",
-        "UNFALLORT",
-        "UNFALL_STRASSE",
-        "FAHRZEUGTYP",
-        "KENNZEICHEN",
-        "FAHRZEUG_KENNZEICHEN",
-        "POLIZEIAKTE_NUMMER",
-        "SCHADENSNUMMER",
-        "AKTENZEICHEN",
-        "SCHADENHERGANG",
-        "KOSTENSUMME_X",
-        "FRIST_DATUM",
-        "HEUTDATUM",
-    ]
+def daten_nachbearbeiten(daten, platzhalter):
+    # Standardfelder ergänzen
+    alle_keys = ["MANDANT_VORNAME", "MANDANT_NACHNAME", "MANDANT_NAME",
+                 "MANDANT_STRASSE", "MANDANT_PLZ_ORT", "UNFALL_DATUM",
+                 "UNFALL_UHRZEIT", "UNFALLORT", "UNFALL_STRASSE",
+                 "FAHRZEUGTYP", "KENNZEICHEN", "FAHRZEUG_KENNZEICHEN",
+                 "POLIZEIAKTE_NUMMER", "SCHADENSNUMMER", "AKTENZEICHEN",
+                 "SCHADENHERGANG", "REPARATURKOSTEN", "WERTMINDERUNG",
+                 "KOSTENPAUSCHALE", "GUTACHTERKOSTEN", "KOSTENSUMME_X",
+                 "FRIST_DATUM", "HEUTDATUM"]
     for k in alle_keys:
         daten.setdefault(k, "")
 
-    text_felder_mit_fallback = [
-        "MANDANT_VORNAME",
-        "MANDANT_NACHNAME",
-        "MANDANT_NAME",
-        "MANDANT_STRASSE",
-        "MANDANT_PLZ_ORT",
-        "UNFALL_DATUM",
-        "UNFALL_UHRZEIT",
-        "UNFALLORT",
-        "UNFALL_STRASSE",
-        "FAHRZEUGTYP",
-        "KENNZEICHEN",
-        "POLIZEIAKTE_NUMMER",
-        "AKTENZEICHEN",
-    ]
-    for feld in text_felder_mit_fallback:
-        if not (daten.get(feld) or "").strip():
-            daten[feld] = "nicht bekannt"
+    # Totalschaden-Logik
+    daten = baue_totalschaden(daten, platzhalter)
 
-    if not (daten.get("FAHRZEUG_KENNZEICHEN") or "").strip():
-        daten["FAHRZEUG_KENNZEICHEN"] = daten.get("KENNZEICHEN", "nicht bekannt")
-
-    geld_felder = [
-        "REPARATURKOSTEN",
-        "WERTMINDERUNG",
-        "KOSTENPAUSCHALE",
-        "GUTACHTERKOSTEN",
-    ]
-    geld_werte = {}
-
+    # Nachbearbeitung von Geldfeldern
+    geld_felder = ["REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN"]
+    gesamt = 0.0
     for feld in geld_felder:
-        roh = daten.get(feld, None)
-
-        if roh is None:
-            betrag = 0.0
-            daten[feld] = float_zu_euro(betrag)
-        else:
-            betrag = euro_zu_float(roh)
-            daten[feld] = float_zu_euro(betrag)
-
-        geld_werte[feld] = betrag
-
-    gesamt = sum(geld_werte.values())
+        wert = euro_zu_float(daten.get(feld, 0))
+        daten[feld] = float_zu_euro(wert)
+        gesamt += wert
     daten["KOSTENSUMME_X"] = float_zu_euro(gesamt)
-    daten["GESAMTSUMME"] = daten["KOSTENSUMME_X"]
 
     jetzt = datetime.now()
-    frist = jetzt + timedelta(days=14)
-    daten["FRIST_DATUM"] = frist.strftime("%d.%m.%Y")
+    daten["FRIST_DATUM"] = (jetzt + timedelta(days=14)).strftime("%d.%m.%Y")
     daten["HEUTDATUM"] = jetzt.strftime("%d.%m.%Y")
-
-    sh = (daten.get("SCHADENHERGANG") or "").strip()
-    if not sh:
-        print("[WARNUNG] SCHADENHERGANG fehlt – Standardtext wird verwendet.")
-        daten["SCHADENHERGANG"] = baue_standard_schadenhergang(daten)
-
-    if not (daten.get("SCHADENSNUMMER") or "").strip():
-        daten["SCHADENSNUMMER"] = "nicht bekannt"
 
     return daten
 
-
 def word_aus_vorlage_erstellen(daten: dict, vorlage_pfad: str, ziel_pfad: str):
-    if not os.path.isfile(vorlage_pfad):
-        raise FileNotFoundError(f"Word-Vorlage nicht gefunden: {vorlage_pfad}")
-
     doc = DocxTemplate(vorlage_pfad)
-    try:
-        doc.render(daten)
-    except Exception as e:
-        raise RuntimeError(f"Fehler beim Rendern der Word-Vorlage: {e}")
-
+    # Nur Platzhalter einsetzen, die auch in der Vorlage existieren
+    platzhalter = doc.get_undeclared_template_variables()
+    daten_fuer_vorlage = {k: v for k, v in daten.items() if k in platzhalter}
+    doc.render(daten_fuer_vorlage)
     os.makedirs(os.path.dirname(ziel_pfad), exist_ok=True)
     doc.save(ziel_pfad)
 
-
-def ki_datei_verarbeiten(pfad_ki_txt: str) -> str:
-    print(f"Verarbeite KI-Antwort: {pfad_ki_txt}")
-
+def ki_datei_verarbeiten(pfad_ki_txt: str, vorlage_pfad: str) -> str:
     with open(pfad_ki_txt, "r", encoding="utf-8") as f:
         ki_text = f.read()
-
     daten = json_aus_ki_antwort_parsen(ki_text)
-
-    setze_schadensnummer(daten, ki_text)
-
-    daten = daten_nachbearbeiten(daten)
+    platzhalter = extrahiere_platzhalter(vorlage_pfad)
+    daten = daten_nachbearbeiten(daten, platzhalter)
 
     basisname = os.path.splitext(os.path.basename(pfad_ki_txt))[0]
     datum_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     ausgabe_name = f"{basisname}_schreiben_{datum_str}.docx"
     ausgabe_pfad = os.path.join(AUSGANGS_ORDNER, ausgabe_name)
 
-    word_aus_vorlage_erstellen(daten, VORLAGE_PFAD, ausgabe_pfad)
-
+    word_aus_vorlage_erstellen(daten, vorlage_pfad, ausgabe_pfad)
     print(f"Fertiges Schreiben gespeichert: {ausgabe_pfad}")
     return ausgabe_pfad
 
-
-def neueste_ki_datei_finden() -> str | None:
-    if not os.path.isdir(KI_ANTWORT_ORDNER):
-        print("KI-Antwort-Ordner existiert nicht.")
-        return None
-
-    dateien = [
-        os.path.join(KI_ANTWORT_ORDNER, d)
-        for d in os.listdir(KI_ANTWORT_ORDNER)
-        if d.endswith("_ki.txt")
-    ]
-
-    if not dateien:
-        print("Keine *_ki.txt-Dateien gefunden.")
-        return None
-
-    neueste = max(dateien, key=os.path.getmtime)
-    print(f"Neueste KI-Datei: {neueste}")
-    return neueste
-
-
-def main(pfad_ki_txt: str | None = None) -> str | None:
+def main(pfad_ki_txt: str = None, vorlage_pfad: str = VORLAGE_PFAD) -> str:
     os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
     os.makedirs(AUSGANGS_ORDNER, exist_ok=True)
 
     if pfad_ki_txt is None:
-        pfad_ki_txt = neueste_ki_datei_finden()
-        if pfad_ki_txt is None:
-            return None
+        # Suche neueste KI-Datei
+        dateien = [os.path.join(KI_ANTWORT_ORDNER, f) for f in os.listdir(KI_ANTWORT_ORDNER) if f.endswith("_ki.txt")]
+        if not dateien:
+            raise FileNotFoundError("Keine KI-Datei gefunden.")
+        pfad_ki_txt = max(dateien, key=os.path.getmtime)
 
     if not os.path.isfile(pfad_ki_txt):
-        raise FileNotFoundError(f"Angegebene KI-Datei existiert nicht: {pfad_ki_txt}")
+        raise FileNotFoundError(f"KI-Datei existiert nicht: {pfad_ki_txt}")
 
-    return ki_datei_verarbeiten(pfad_ki_txt)
-
+    return ki_datei_verarbeiten(pfad_ki_txt, vorlage_pfad)
 
 if __name__ == "__main__":
     main()
