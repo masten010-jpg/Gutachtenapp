@@ -1,166 +1,98 @@
-# app.py
 import os
+import json
 from datetime import datetime
-
 import streamlit as st
+from werkzeug.security import check_password_hash
 
 import programm_1_ki_input
 import programm_2_word_output
 
-# ==========================
-# Basis-Setup / Pfade
-# ==========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-EINGANGS_ORDNER = os.path.join(BASE_DIR, "eingang_gutachten")
-AUSGANGS_ORDNER = os.path.join(BASE_DIR, "ausgang_schreiben")
-KI_ANTWORT_ORDNER = os.path.join(BASE_DIR, "ki_antworten")
 
-os.makedirs(EINGANGS_ORDNER, exist_ok=True)
-os.makedirs(AUSGANGS_ORDNER, exist_ok=True)
-os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
+EINGANG = os.path.join(BASE_DIR, "eingang_gutachten")
+KI_ORDNER = os.path.join(BASE_DIR, "ki_antworten")
+AUSGANG = os.path.join(BASE_DIR, "ausgang_schreiben")
+VORLAGEN = os.path.join(BASE_DIR, "vorlagen")
+USERS = os.path.join(BASE_DIR, "users", "users.json")
 
-st.set_page_config(page_title="Kfz-Gutachten → Anwaltsschreiben", layout="centered")
+for p in [EINGANG, KI_ORDNER, AUSGANG]:
+    os.makedirs(p, exist_ok=True)
 
-# ==========================
-# Passwortschutz
-# ==========================
+st.set_page_config("Gutachten → Anwaltsschreiben", layout="centered")
 
-# HIER Passwort einstellen
-x = "passwort123"  # <- nach Wunsch ändern
+# ---------------- LOGIN ----------------
 
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
+def lade_users():
+    with open(USERS, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-if not st.session_state["logged_in"]:
-    st.title("Zugang geschützt")
-    pw = st.text_input("Passwort eingeben", type="password")
-    login_clicked = st.button("Login")
+if "user" not in st.session_state:
+    st.session_state.user = None
 
-    # Noch nicht geklickt → nur Maske anzeigen
-    if not login_clicked:
-        st.stop()
+if not st.session_state.user:
+    st.title("Login")
 
-    # Button geklickt, Passwort falsch
-    if pw != x:
-        st.error("Falsches Passwort.")
-        st.stop()
+    username = st.text_input("Benutzername")
+    password = st.text_input("Passwort", type="password")
 
-    # Passwort korrekt → Status setzen und neu starten
-    st.session_state["logged_in"] = True
-    st.rerun()
+    if st.button("Login"):
+        users = lade_users()
+        if username in users and check_password_hash(
+            users[username]["password_hash"], password
+        ):
+            st.session_state.user = username
+            st.rerun()
+        else:
+            st.error("Login fehlgeschlagen")
 
-# ==========================
-# App-Inhalt (nur nach Login)
-# ==========================
+    st.stop()
+
+# ---------------- APP ----------------
 
 st.title("Kfz-Gutachten Automatisierung")
-st.write(
-    "PDF-Gutachten hochladen, von der KI auswerten lassen und fertiges "
-    "Anwaltsschreiben als Word-Datei erhalten."
-)
+st.success(f"Eingeloggt als {st.session_state.user}")
 
-# Optional: Logout
-if st.button("Logout"):
-    st.session_state["logged_in"] = False
-    st.rerun()
+vorlagen = {
+    "Reparaturschaden": "reparaturschaden.docx",
+    "Totalschaden": "totalschaden.docx"
+}
 
+auswahl = st.selectbox("Vorlage auswählen", list(vorlagen.keys()))
+vorlage_pfad = os.path.join(VORLAGEN, vorlagen[auswahl])
 
-def cleanup_files(*paths: str):
-    for path in paths:
-        if path and os.path.exists(path):
-            try:
-                os.remove(path)
-                print(f"Gelöscht: {path}")
-            except OSError as e:
-                print(f"Fehler beim Löschen von {path}: {e}")
+uploaded = st.file_uploader("Gutachten (PDF)", type=["pdf"])
 
+if st.button("Verarbeiten"):
+    if not uploaded:
+        st.error("Bitte PDF hochladen.")
+        st.stop()
 
-# --------------------------------------------------
-# 1) Upload + Verarbeiten + Download + Löschen
-# --------------------------------------------------
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    pdf_pfad = os.path.join(EINGANG, f"gutachten_{ts}.pdf")
 
-st.header("1. Gutachten hochladen, verarbeiten und Schreiben herunterladen")
+    with open(pdf_pfad, "wb") as f:
+        f.write(uploaded.getbuffer())
 
-uploaded_file = st.file_uploader("Gutachten als PDF hochladen", type=["pdf"])
+    with st.spinner("KI analysiert Gutachten..."):
+        ki_pfad = programm_1_ki_input.main(pdf_pfad)
 
-if st.button("Gutachten verarbeiten"):
-    if uploaded_file is None:
-        st.error("Bitte zuerst eine PDF-Datei hochladen.")
-    else:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_name = f"gutachten_{timestamp}.pdf"
-        pdf_path = os.path.join(EINGANGS_ORDNER, safe_name)
+        docx_pfad = programm_2_word_output.main(
+            pfad_ki_txt=ki_pfad,
+            vorlage_pfad=vorlage_pfad
+        )
 
-        try:
-            with open(pdf_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-        except Exception as e:
-            st.error(f"Fehler beim Speichern der PDF-Datei: {e}")
-        else:
-            st.info(f"PDF gespeichert als: {safe_name}")
+    with open(docx_pfad, "rb") as f:
+        daten = f.read()
 
-            try:
-                with st.spinner("Verarbeite Gutachten mit KI..."):
-                    # Programm 1: genau DIESE PDF an Gemini → *_ki.txt
-                    pfad_ki = programm_1_ki_input.main(pdf_path)
+    st.download_button(
+        "Anwaltsschreiben herunterladen",
+        daten,
+        file_name=os.path.basename(docx_pfad),
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
 
-                    if pfad_ki is None or not os.path.isfile(pfad_ki):
-                        raise RuntimeError(
-                            "Programm 1 hat keine gültige KI-Antwort erzeugt."
-                        )
+    for p in [pdf_pfad, ki_pfad, docx_pfad]:
+        if os.path.exists(p):
+            os.remove(p)
 
-                    # Programm 2: *_ki.txt → Word-Dokument
-                    docx_pfad = programm_2_word_output.main(pfad_ki)
-
-                    if docx_pfad is None or not os.path.isfile(docx_pfad):
-                        raise RuntimeError(
-                            "Programm 2 hat kein Schreiben erzeugt."
-                        )
-
-                # Word-Datei in Speicher laden, bevor wir sie löschen
-                with open(docx_pfad, "rb") as f:
-                    docx_bytes = f.read()
-
-                # Dateien vom Server löschen (PDF, KI-Text, DOCX)
-                cleanup_files(pdf_path, pfad_ki, docx_pfad)
-
-                st.success("Verarbeitung abgeschlossen.")
-                st.success("Alle Daten wurden gelöscht!")
-
-                # Download-Button mit in-memory Bytes
-                st.download_button(
-                    label="Erstelltes Anwaltsschreiben herunterladen",
-                    data=docx_bytes,
-                    file_name=os.path.basename(docx_pfad),
-                    mime=(
-                        "application/vnd.openxmlformats-officedocument."
-                        "wordprocessingml.document"
-                    ),
-                )
-
-            except Exception as e:
-                st.error(f"Fehler bei der Verarbeitung: {e}")
-
-
-# --------------------------------------------------
-# 2) Debug-Infos (optional)
-# --------------------------------------------------
-
-with st.expander("Debug: Dateien im System anzeigen"):
-    st.subheader("Eingang Gutachten (eingang_gutachten)")
-    if os.path.isdir(EINGANGS_ORDNER):
-        st.write(os.listdir(EINGANGS_ORDNER))
-    else:
-        st.write("Ordner existiert nicht.")
-
-    st.subheader("KI-Antworten (ki_antworten)")
-    if os.path.isdir(KI_ANTWORT_ORDNER):
-        st.write(os.listdir(KI_ANTWORT_ORDNER))
-    else:
-        st.write("Ordner existiert nicht.")
-
-    st.subheader("Ausgang-Schreiben (ausgang_schreiben)")
-    if os.path.isdir(AUSGANGS_ORDNER):
-        st.write(os.listdir(AUSGANGS_ORDNER))
-    else:
-        st.write("Ordner existiert nicht.")
+    st.success("Fertig. Alle Dateien gelöscht.")
