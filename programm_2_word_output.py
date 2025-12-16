@@ -4,7 +4,7 @@ import json
 import re
 from datetime import datetime, timedelta
 from docxtpl import DocxTemplate
-from programm_1_ki_input import KI_ANTWORT_ORDNER, BASE_DIR, VORLAGE_PFAD
+from programm_1_ki_input import KI_ANTWORT_ORDNER, BASE_DIR
 
 AUSGANGS_ORDNER = os.path.join(BASE_DIR, "ausgang_schreiben")
 JSON_START_MARKER = "JSON_START"
@@ -125,3 +125,4 @@ def main(pfad_ki_txt: str = None, vorlage_pfad: str = VORLAGE_PFAD) -> str:
 
 if __name__ == "__main__":
     main()
+
