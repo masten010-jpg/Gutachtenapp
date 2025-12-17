@@ -107,9 +107,14 @@ def ki_datei_verarbeiten(pfad_ki_txt: str, vorlage_pfad: str) -> str:
     print(f"Fertiges Schreiben gespeichert: {ausgabe_pfad}")
     return ausgabe_pfad
 
-def main(pfad_ki_txt: str = None, vorlage_pfad: str = VORLAGE_PFAD) -> str:
+def main(pfad_ki_txt: str = None, vorlage_pfad: str = None) -> str:
     os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
     os.makedirs(AUSGANGS_ORDNER, exist_ok=True)
+
+    if vorlage_pfad is None:
+        raise ValueError("vorlage_pfad muss übergeben werden (Word-Vorlage .docx).")
+
+   
 
     if pfad_ki_txt is None:
         # Suche neueste KI-Datei
@@ -125,4 +130,5 @@ def main(pfad_ki_txt: str = None, vorlage_pfad: str = VORLAGE_PFAD) -> str:
 
 if __name__ == "__main__":
     main()
+
 
