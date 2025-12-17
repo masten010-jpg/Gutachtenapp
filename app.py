@@ -1,209 +1,217 @@
-# programm_2_word_output.py
+# app.py
 import os
-import json
-from datetime import datetime, timedelta
+from datetime import datetime
+import streamlit as st
 from docxtpl import DocxTemplate
 
 import config
-from programm_1_ki_input import KI_ANTWORT_ORDNER, BASE_DIR  # deine Namen bleiben wie gehabt
+import programm_1_ki_input
+import programm_2_word_output
 
-AUSGANGS_ORDNER = os.path.join(BASE_DIR, "ausgang_schreiben")
-JSON_START_MARKER = "JSON_START"
-JSON_END_MARKER = "JSON_END"
+# ==========================
+# Basis-Setup / Pfade (Namen bleiben wie von dir)
+# ==========================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+EINGANGS_ORDNER = config.EINGANGS_ORDNER
+KI_ANTWORT_ORDNER = config.KI_ANTWORT_ORDNER
+AUSGANGS_ORDNER = os.path.join(BASE_DIR, "ausgang_schreiben")  # falls nicht in config definiert
 
-def json_aus_ki_antwort_parsen(ki_text: str) -> dict:
-    """
-    Erwartet JSON zwischen JSON_START und JSON_END.
-    Robust gegen Codefences/zusätzlichen Text, solange Marker vorhanden sind.
-    """
-    start_idx = ki_text.find(JSON_START_MARKER)
-    end_idx = ki_text.find(JSON_END_MARKER)
+os.makedirs(EINGANGS_ORDNER, exist_ok=True)
+os.makedirs(AUSGANGS_ORDNER, exist_ok=True)
+os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
 
-    if start_idx == -1 or end_idx == -1:
-        raise ValueError("JSON_START oder JSON_END nicht gefunden.")
+st.set_page_config(page_title="Kfz-Gutachten → Anwaltsschreiben", layout="centered")
 
-    json_roh = ki_text[start_idx + len(JSON_START_MARKER):end_idx].strip()
+# ==========================
+# Benutzerkonten (wie von dir)
+# ==========================
+USER_CREDENTIALS = {
+    "admin": "passwort123",
+    "husseon": "geheim",
+    "anwalt": "anwaltpass"
+}
 
-    # Falls die KI ```json ... ``` drumrum packt: entfernen
-    json_roh = json_roh.replace("```json", "").replace("```JSON", "").replace("```", "").strip()
+# ==========================
+# Vorlagen (wie von dir, aber mit config.DEFAULT_VORLAGE ergänzt)
+# - keine Umbenennung der Variablen
+# ==========================
+VORLAGEN = {
+    "Standard": "vorlage_schreiben.docx",
+    "Wertminderung": "vorlage_schreibenwertmind.docx",
+    "Totalschaden": "vorlage_schreibentotalschaden.docx",
+}
 
-    first_brace = json_roh.find("{")
-    last_brace = json_roh.rfind("}")
-    if first_brace == -1 or last_brace == -1 or first_brace >= last_brace:
-        raise ValueError("Kein gültiger JSON-Block in KI-Antwort.")
-
-    json_clean = json_roh[first_brace:last_brace + 1]
-
-    try:
-        return json.loads(json_clean)
-    except json.JSONDecodeError as e:
-        # Letzter Rettungsanker: häufige KI-Fehler entschärfen
-        # (z.B. trailing commas)
-        json_clean2 = json_clean.replace(",\n}", "\n}").replace(",}", "}")
-        return json.loads(json_clean2)
-
-
-def euro_zu_float(text) -> float:
-    """
-    Konvertiert typische deutsche/englische Geldformate in float.
-    Beispiele:
-      "1.234,56 €" -> 1234.56
-      "1234,56"    -> 1234.56
-      "1234.56"    -> 1234.56
-      "" / None    -> 0.0
-    """
-    if isinstance(text, (int, float)):
-        return float(text)
-
-    if not text:
-        return 0.0
-
-    t = str(text)
-    t = t.replace("€", "").replace("EUR", "").replace("Euro", "")
-    t = t.replace("\u00a0", " ").strip()  # NBSP
-    t = t.replace(" ", "")
-
-    # Nur Ziffern/.,- behalten (Minus/Komma/Punkt)
-    # (Alles andere raus, z.B. "netto", "brutto", etc.)
-    cleaned = []
-    for ch in t:
-        if ch.isdigit() or ch in [".", ",", "-", "+"]:
-            cleaned.append(ch)
-    t = "".join(cleaned)
-
-    if not t:
-        return 0.0
-
-    # Heuristik:
-    # - Wenn sowohl '.' als auch ',' vorkommen: '.' = Tausender, ',' = Dezimal
-    # - Wenn nur ',' vorkommt: ',' = Dezimal
-    # - Wenn nur '.' vorkommt: '.' = Dezimal
-    if "." in t and "," in t:
-        t = t.replace(".", "").replace(",", ".")
-    elif "," in t:
-        t = t.replace(",", ".")
-    # else: '.' bleibt als Dezimalpunkt
-
-    try:
-        return float(t)
-    except ValueError:
-        return 0.0
-
-
-def float_zu_euro(betrag: float) -> str:
-    s = f"{betrag:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return s + " €"
-
+# ==========================
+# Hilfsfunktionen
+# ==========================
+def cleanup_files(*paths: str):
+    for path in paths:
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+                print(f"Gelöscht: {path}")
+            except OSError as e:
+                print(f"Fehler beim Löschen von {path}: {e}")
 
 def extrahiere_platzhalter(vorlage_pfad):
+    """Platzhalter aus der Word-Vorlage extrahieren."""
     doc = DocxTemplate(vorlage_pfad)
     return doc.get_undeclared_template_variables()
 
+def resolve_vorlage_pfad(auswahl: str) -> str:
+    """
+    Liefert einen gültigen absoluten Pfad zur Vorlage.
+    Priorität:
+      1) config.DEFAULT_VORLAGE für "Standard" (wie in deiner config)
+      2) Datei im config.VORLAGEN_ORDNER
+      3) Datei direkt im BASE_DIR
+    """
+    if auswahl == "Standard":
+        # Nutze deine config-Default-Vorlage, falls vorhanden
+        if hasattr(config, "DEFAULT_VORLAGE") and config.DEFAULT_VORLAGE:
+            if os.path.isfile(config.DEFAULT_VORLAGE):
+                return config.DEFAULT_VORLAGE
 
-def baue_totalschaden(daten, platzhalter):
-    # Nur wenn die Vorlage den Platzhalter wirklich hat, berechnen wir ihn
-    if "WIEDERBESCHAFFUNGSWERTAUFWAND" in platzhalter:
-        wbw = euro_zu_float(daten.get("WIEDERBESCHAFFUNGSWERT", 0))
-        restwert = euro_zu_float(daten.get("RESTWERT", 0))
-        wiederbeschaffungsaufwand = wbw - restwert
-        daten["WIEDERBESCHAFFUNGSWERTAUFWAND"] = float_zu_euro(wiederbeschaffungsaufwand)
-    return daten
+    dateiname = VORLAGEN[auswahl]
 
+    # 1) Vorlagenordner aus config
+    if hasattr(config, "VORLAGEN_ORDNER"):
+        pfad1 = os.path.join(config.VORLAGEN_ORDNER, dateiname)
+        if os.path.isfile(pfad1):
+            return pfad1
 
-def daten_nachbearbeiten(daten, platzhalter):
-    # Standardfelder ergänzen (deine Keys bleiben exakt wie in deinem Prompt)
-    alle_keys = [
-        "MANDANT_VORNAME", "MANDANT_NACHNAME", "MANDANT_NAME",
-        "MANDANT_STRASSE", "MANDANT_PLZ_ORT", "UNFALL_DATUM",
-        "UNFALL_UHRZEIT", "UNFALLORT", "UNFALL_STRASSE",
-        "FAHRZEUGTYP", "KENNZEICHEN", "FAHRZEUG_KENNZEICHEN",
-        "POLIZEIAKTE_NUMMER", "SCHADENSNUMMER", "AKTENZEICHEN",
-        "SCHADENHERGANG", "REPARATURKOSTEN", "WERTMINDERUNG",
-        "KOSTENPAUSCHALE", "GUTACHTERKOSTEN", "KOSTENSUMME_X",
-        "FRIST_DATUM", "HEUTDATUM"
-    ]
-    for k in alle_keys:
-        daten.setdefault(k, "")
+    # 2) Fallback: BASE_DIR
+    pfad2 = os.path.join(BASE_DIR, dateiname)
+    if os.path.isfile(pfad2):
+        return pfad2
 
-    # Totalschaden-Logik (nur wenn Platzhalter existiert)
-    daten = baue_totalschaden(daten, platzhalter)
+    # 3) Letzter Versuch: genau so, wie übergeben (falls absolut)
+    if os.path.isabs(dateiname) and os.path.isfile(dateiname):
+        return dateiname
 
-    # Geldfelder formatieren + Summe rechnen
-    geld_felder = ["REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN"]
-    gesamt = 0.0
-    for feld in geld_felder:
-        wert = euro_zu_float(daten.get(feld, 0))
-        daten[feld] = float_zu_euro(wert)
-        gesamt += wert
+    raise FileNotFoundError(f"Vorlage nicht gefunden: {dateiname}")
 
-    daten["KOSTENSUMME_X"] = float_zu_euro(gesamt)
+# ==========================
+# App-Logik (als Funktion, weil du in deinem Projekt main() nutzt)
+# ==========================
+def main():
+    # ==========================
+    # Passwortschutz
+    # ==========================
+    if "logged_in" not in st.session_state:
+        st.session_state["logged_in"] = False
+        st.session_state["username"] = None
 
-    jetzt = datetime.now()
-    daten["FRIST_DATUM"] = (jetzt + timedelta(days=14)).strftime("%d.%m.%Y")
-    daten["HEUTDATUM"] = jetzt.strftime("%d.%m.%Y")
+    if not st.session_state["logged_in"]:
+        st.title("Zugang geschützt")
+        username = st.text_input("Benutzername")
+        pw = st.text_input("Passwort", type="password")
+        login_clicked = st.button("Login")
 
-    return daten
+        if login_clicked:
+            if USER_CREDENTIALS.get(username) == pw:
+                st.session_state["logged_in"] = True
+                st.session_state["username"] = username
+                st.rerun()
+            else:
+                st.error("Benutzername oder Passwort falsch")
+        else:
+            st.stop()
 
+    # ==========================
+    # App-Inhalt (nach Login)
+    # ==========================
+    st.title(f"Kfz-Gutachten Automatisierung - Eingeloggt als {st.session_state['username']}")
 
-def word_aus_vorlage_erstellen(daten: dict, vorlage_pfad: str, ziel_pfad: str):
-    doc = DocxTemplate(vorlage_pfad)
+    # Logout
+    if st.button("Logout"):
+        st.session_state["logged_in"] = False
+        st.session_state["username"] = None
+        st.rerun()
 
-    # Nur Platzhalter einsetzen, die auch in der Vorlage existieren
-    platzhalter = doc.get_undeclared_template_variables()
-    daten_fuer_vorlage = {k: v for k, v in daten.items() if k in platzhalter}
+    # ==========================
+    # Vorlage auswählen
+    # ==========================
+    st.header("1. Schreiben Vorlage wählen")
+    auswahl = st.selectbox("Welche Vorlage möchten Sie verwenden?", list(VORLAGEN.keys()))
+    try:
+        vorlage_pfad = resolve_vorlage_pfad(auswahl)
+    except Exception as e:
+        st.error(f"Vorlagenfehler: {e}")
+        st.stop()
 
-    doc.render(daten_fuer_vorlage)
-    os.makedirs(os.path.dirname(ziel_pfad), exist_ok=True)
-    doc.save(ziel_pfad)
+    # ==========================
+    # PDF Upload & Verarbeitung
+    # ==========================
+    st.header("2. Gutachten hochladen, verarbeiten und Schreiben herunterladen")
+    uploaded_file = st.file_uploader("Gutachten als PDF hochladen", type=["pdf"])
 
+    if st.button("Gutachten verarbeiten"):
+        if uploaded_file is None:
+            st.error("Bitte zuerst eine PDF-Datei hochladen.")
+            st.stop()
 
-def ki_datei_verarbeiten(pfad_ki_txt: str, vorlage_pfad: str) -> str:
-    with open(pfad_ki_txt, "r", encoding="utf-8") as f:
-        ki_text = f.read()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_name = f"gutachten_{timestamp}.pdf"
+        pdf_path = os.path.join(EINGANGS_ORDNER, safe_name)
 
-    daten = json_aus_ki_antwort_parsen(ki_text)
-    platzhalter = extrahiere_platzhalter(vorlage_pfad)
-    daten = daten_nachbearbeiten(daten, platzhalter)
+        try:
+            with open(pdf_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+        except Exception as e:
+            st.error(f"Fehler beim Speichern der PDF-Datei: {e}")
+            st.stop()
 
-    basisname = os.path.splitext(os.path.basename(pfad_ki_txt))[0]
-    datum_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    ausgabe_name = f"{basisname}_schreiben_{datum_str}.docx"
-    ausgabe_pfad = os.path.join(AUSGANGS_ORDNER, ausgabe_name)
+        st.info(f"PDF gespeichert als: {safe_name}")
 
-    word_aus_vorlage_erstellen(daten, vorlage_pfad, ausgabe_pfad)
-    print(f"Fertiges Schreiben gespeichert: {ausgabe_pfad}")
-    return ausgabe_pfad
+        try:
+            with st.spinner("Verarbeite Gutachten mit KI..."):
+                # 1) KI-Programm
+                pfad_ki = programm_1_ki_input.main(pdf_path)
 
+                if pfad_ki is None or not os.path.isfile(pfad_ki):
+                    raise RuntimeError("Programm 1 hat keine gültige KI-Antwort erzeugt.")
 
-def main(pfad_ki_txt: str = None, vorlage_pfad: str = None) -> str:
-    # Ordner wie gehabt sicherstellen
-    os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
-    os.makedirs(AUSGANGS_ORDNER, exist_ok=True)
+                # Optional: Platzhalter check (nur wenn du willst)
+                # platzhalter = extrahiere_platzhalter(vorlage_pfad)
 
-    # Vorlage MUSS von app.py übergeben werden (damit die Auswahl wirkt)
-    if vorlage_pfad is None:
-        raise ValueError("vorlage_pfad muss übergeben werden (Word-Vorlage .docx).")
+                # 2) Word-Dokument erzeugen (WICHTIG: vorlage_pfad wird übergeben)
+                docx_pfad = programm_2_word_output.main(pfad_ki, vorlage_pfad)
 
-    if pfad_ki_txt is None:
-        # Suche neueste KI-Datei
-        dateien = [
-            os.path.join(KI_ANTWORT_ORDNER, f)
-            for f in os.listdir(KI_ANTWORT_ORDNER)
-            if f.endswith("_ki.txt")
-        ]
-        if not dateien:
-            raise FileNotFoundError("Keine KI-Datei gefunden.")
-        pfad_ki_txt = max(dateien, key=os.path.getmtime)
+                if docx_pfad is None or not os.path.isfile(docx_pfad):
+                    raise RuntimeError("Programm 2 hat kein Schreiben erzeugt.")
 
-    if not os.path.isfile(pfad_ki_txt):
-        raise FileNotFoundError(f"KI-Datei existiert nicht: {pfad_ki_txt}")
+            # Word-Datei in Speicher laden, bevor wir sie löschen
+            with open(docx_pfad, "rb") as f:
+                docx_bytes = f.read()
 
-    if not os.path.isfile(vorlage_pfad):
-        raise FileNotFoundError(f"Vorlage existiert nicht: {vorlage_pfad}")
+            # Dateien vom Server löschen (PDF, KI-Text, DOCX)
+            cleanup_files(pdf_path, pfad_ki, docx_pfad)
 
-    return ki_datei_verarbeiten(pfad_ki_txt, vorlage_pfad)
+            st.success("Verarbeitung abgeschlossen.")
+            st.success("Die Dateien wurden nach der Verarbeitung vom Server gelöscht.")
 
+            st.download_button(
+                label="Erstelltes Anwaltsschreiben herunterladen",
+                data=docx_bytes,
+                file_name=os.path.basename(docx_pfad),
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
 
-if __name__ == "__main__":
-    main()
+        except Exception as e:
+            st.error(f"Fehler bei der Verarbeitung: {e}")
+
+    # ==========================
+    # Debug-Infos
+    # ==========================
+    with st.expander("Debug: Dateien im System anzeigen"):
+        st.subheader("Eingang Gutachten")
+        st.write(os.listdir(EINGANGS_ORDNER))
+        st.subheader("KI-Antworten")
+        st.write(os.listdir(KI_ANTWORT_ORDNER))
+        st.subheader("Ausgang-Schreiben")
+        st.write(os.listdir(AUSGANGS_ORDNER))
+
+# Streamlit führt top-level aus; main() ist für deine bestehende Struktur.
+main()
