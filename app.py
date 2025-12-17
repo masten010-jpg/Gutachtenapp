@@ -1,167 +1,209 @@
-# app.py
+# programm_2_word_output.py
 import os
-from datetime import datetime
-import streamlit as st
+import json
+from datetime import datetime, timedelta
 from docxtpl import DocxTemplate
 
-import programm_1_ki_input
-import programm_2_word_output
+import config
+from programm_1_ki_input import KI_ANTWORT_ORDNER, BASE_DIR  # deine Namen bleiben wie gehabt
 
-# ==========================
-# Basis-Setup / Pfade
-# ==========================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-EINGANGS_ORDNER = os.path.join(BASE_DIR, "eingang_gutachten")
 AUSGANGS_ORDNER = os.path.join(BASE_DIR, "ausgang_schreiben")
-KI_ANTWORT_ORDNER = os.path.join(BASE_DIR, "ki_antworten")
+JSON_START_MARKER = "JSON_START"
+JSON_END_MARKER = "JSON_END"
 
-os.makedirs(EINGANGS_ORDNER, exist_ok=True)
-os.makedirs(AUSGANGS_ORDNER, exist_ok=True)
-os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
 
-st.set_page_config(page_title="Kfz-Gutachten → Anwaltsschreiben", layout="centered")
+def json_aus_ki_antwort_parsen(ki_text: str) -> dict:
+    """
+    Erwartet JSON zwischen JSON_START und JSON_END.
+    Robust gegen Codefences/zusätzlichen Text, solange Marker vorhanden sind.
+    """
+    start_idx = ki_text.find(JSON_START_MARKER)
+    end_idx = ki_text.find(JSON_END_MARKER)
 
-# ==========================
-# Benutzerkonten
-# ==========================
-USER_CREDENTIALS = {
-    "admin": "passwort123",
-    "husseon": "geheim",
-    "anwalt": "anwaltpass"
-}
+    if start_idx == -1 or end_idx == -1:
+        raise ValueError("JSON_START oder JSON_END nicht gefunden.")
 
-VORLAGEN = {
-    "Wertminderung": "vorlage_schreibenwertmind.docx",
-    "Totalschaden": "vorlage_schreibentotalschaden.docx"
-}
+    json_roh = ki_text[start_idx + len(JSON_START_MARKER):end_idx].strip()
 
-# ==========================
-# Passwortschutz
-# ==========================
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-    st.session_state["username"] = None
+    # Falls die KI ```json ... ``` drumrum packt: entfernen
+    json_roh = json_roh.replace("```json", "").replace("```JSON", "").replace("```", "").strip()
 
-if not st.session_state["logged_in"]:
-    st.title("Zugang geschützt")
-    username = st.text_input("Benutzername")
-    pw = st.text_input("Passwort", type="password")
-    login_clicked = st.button("Login")
+    first_brace = json_roh.find("{")
+    last_brace = json_roh.rfind("}")
+    if first_brace == -1 or last_brace == -1 or first_brace >= last_brace:
+        raise ValueError("Kein gültiger JSON-Block in KI-Antwort.")
 
-    if login_clicked:
-        if USER_CREDENTIALS.get(username) == pw:
-            st.session_state["logged_in"] = True
-            st.session_state["username"] = username
-            st.rerun()
-        else:
-            st.error("Benutzername oder Passwort falsch")
-    else:
-        st.stop()
+    json_clean = json_roh[first_brace:last_brace + 1]
 
-# ==========================
-# App-Inhalt (nach Login)
-# ==========================
-st.title(f"Kfz-Gutachten Automatisierung - Eingeloggt als {st.session_state['username']}")
+    try:
+        return json.loads(json_clean)
+    except json.JSONDecodeError as e:
+        # Letzter Rettungsanker: häufige KI-Fehler entschärfen
+        # (z.B. trailing commas)
+        json_clean2 = json_clean.replace(",\n}", "\n}").replace(",}", "}")
+        return json.loads(json_clean2)
 
-# Logout
-if st.button("Logout"):
-    st.session_state["logged_in"] = False
-    st.session_state["username"] = None
-    st.rerun()
 
-# ==========================
-# Vorlage auswählen
-# ==========================
-st.header("1. Schreiben Vorlage wählen")
-auswahl = st.selectbox("Welche Vorlage möchten Sie verwenden?", list(VORLAGEN.keys()))
-vorlage_pfad = os.path.join(BASE_DIR, VORLAGEN[auswahl])
+def euro_zu_float(text) -> float:
+    """
+    Konvertiert typische deutsche/englische Geldformate in float.
+    Beispiele:
+      "1.234,56 €" -> 1234.56
+      "1234,56"    -> 1234.56
+      "1234.56"    -> 1234.56
+      "" / None    -> 0.0
+    """
+    if isinstance(text, (int, float)):
+        return float(text)
 
-# ==========================
-# Hilfsfunktionen
-# ==========================
-def cleanup_files(*paths: str):
-    for path in paths:
-        if path and os.path.exists(path):
-            try:
-                os.remove(path)
-                print(f"Gelöscht: {path}")
-            except OSError as e:
-                print(f"Fehler beim Löschen von {path}: {e}")
+    if not text:
+        return 0.0
+
+    t = str(text)
+    t = t.replace("€", "").replace("EUR", "").replace("Euro", "")
+    t = t.replace("\u00a0", " ").strip()  # NBSP
+    t = t.replace(" ", "")
+
+    # Nur Ziffern/.,- behalten (Minus/Komma/Punkt)
+    # (Alles andere raus, z.B. "netto", "brutto", etc.)
+    cleaned = []
+    for ch in t:
+        if ch.isdigit() or ch in [".", ",", "-", "+"]:
+            cleaned.append(ch)
+    t = "".join(cleaned)
+
+    if not t:
+        return 0.0
+
+    # Heuristik:
+    # - Wenn sowohl '.' als auch ',' vorkommen: '.' = Tausender, ',' = Dezimal
+    # - Wenn nur ',' vorkommt: ',' = Dezimal
+    # - Wenn nur '.' vorkommt: '.' = Dezimal
+    if "." in t and "," in t:
+        t = t.replace(".", "").replace(",", ".")
+    elif "," in t:
+        t = t.replace(",", ".")
+    # else: '.' bleibt als Dezimalpunkt
+
+    try:
+        return float(t)
+    except ValueError:
+        return 0.0
+
+
+def float_zu_euro(betrag: float) -> str:
+    s = f"{betrag:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return s + " €"
+
 
 def extrahiere_platzhalter(vorlage_pfad):
-    """Platzhalter aus der Word-Vorlage extrahieren."""
     doc = DocxTemplate(vorlage_pfad)
     return doc.get_undeclared_template_variables()
 
-# ==========================
-# PDF Upload & Verarbeitung
-# ==========================
-st.header("2. Gutachten hochladen, verarbeiten und Schreiben herunterladen")
-uploaded_file = st.file_uploader("Gutachten als PDF hochladen", type=["pdf"])
 
-if st.button("Gutachten verarbeiten"):
-    if uploaded_file is None:
-        st.error("Bitte zuerst eine PDF-Datei hochladen.")
-    else:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_name = f"gutachten_{timestamp}.pdf"
-        pdf_path = os.path.join(EINGANGS_ORDNER, safe_name)
+def baue_totalschaden(daten, platzhalter):
+    # Nur wenn die Vorlage den Platzhalter wirklich hat, berechnen wir ihn
+    if "WIEDERBESCHAFFUNGSWERTAUFWAND" in platzhalter:
+        wbw = euro_zu_float(daten.get("WIEDERBESCHAFFUNGSWERT", 0))
+        restwert = euro_zu_float(daten.get("RESTWERT", 0))
+        wiederbeschaffungsaufwand = wbw - restwert
+        daten["WIEDERBESCHAFFUNGSWERTAUFWAND"] = float_zu_euro(wiederbeschaffungsaufwand)
+    return daten
 
-        try:
-            with open(pdf_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-        except Exception as e:
-            st.error(f"Fehler beim Speichern der PDF-Datei: {e}")
-            st.stop()
 
-        st.info(f"PDF gespeichert als: {safe_name}")
+def daten_nachbearbeiten(daten, platzhalter):
+    # Standardfelder ergänzen (deine Keys bleiben exakt wie in deinem Prompt)
+    alle_keys = [
+        "MANDANT_VORNAME", "MANDANT_NACHNAME", "MANDANT_NAME",
+        "MANDANT_STRASSE", "MANDANT_PLZ_ORT", "UNFALL_DATUM",
+        "UNFALL_UHRZEIT", "UNFALLORT", "UNFALL_STRASSE",
+        "FAHRZEUGTYP", "KENNZEICHEN", "FAHRZEUG_KENNZEICHEN",
+        "POLIZEIAKTE_NUMMER", "SCHADENSNUMMER", "AKTENZEICHEN",
+        "SCHADENHERGANG", "REPARATURKOSTEN", "WERTMINDERUNG",
+        "KOSTENPAUSCHALE", "GUTACHTERKOSTEN", "KOSTENSUMME_X",
+        "FRIST_DATUM", "HEUTDATUM"
+    ]
+    for k in alle_keys:
+        daten.setdefault(k, "")
 
-        try:
-            with st.spinner("Verarbeite Gutachten mit KI..."):
-                # 1) KI-Programm
-                pfad_ki = programm_1_ki_input.main(pdf_path)
+    # Totalschaden-Logik (nur wenn Platzhalter existiert)
+    daten = baue_totalschaden(daten, platzhalter)
 
-                if pfad_ki is None or not os.path.isfile(pfad_ki):
-                    raise RuntimeError("Programm 1 hat keine gültige KI-Antwort erzeugt.")
+    # Geldfelder formatieren + Summe rechnen
+    geld_felder = ["REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN"]
+    gesamt = 0.0
+    for feld in geld_felder:
+        wert = euro_zu_float(daten.get(feld, 0))
+        daten[feld] = float_zu_euro(wert)
+        gesamt += wert
 
-                # 2) Platzhalter aus Vorlage extrahieren
-                platzhalter = extrahiere_platzhalter(vorlage_pfad)
+    daten["KOSTENSUMME_X"] = float_zu_euro(gesamt)
 
-                # 3) Word-Dokument erzeugen
-                # Hier nutzen wir programm_2_word_output.main, das jetzt flexibel alle Variablen aus der KI einfügt
-                docx_pfad = programm_2_word_output.main(pfad_ki)
+    jetzt = datetime.now()
+    daten["FRIST_DATUM"] = (jetzt + timedelta(days=14)).strftime("%d.%m.%Y")
+    daten["HEUTDATUM"] = jetzt.strftime("%d.%m.%Y")
 
-                if docx_pfad is None or not os.path.isfile(docx_pfad):
-                    raise RuntimeError("Programm 2 hat kein Schreiben erzeugt.")
+    return daten
 
-            # Word-Datei in Speicher laden, bevor wir sie löschen
-            with open(docx_pfad, "rb") as f:
-                docx_bytes = f.read()
 
-            # Dateien vom Server löschen (PDF, KI-Text, DOCX)
-            cleanup_files(pdf_path, pfad_ki, docx_pfad)
+def word_aus_vorlage_erstellen(daten: dict, vorlage_pfad: str, ziel_pfad: str):
+    doc = DocxTemplate(vorlage_pfad)
 
-            st.success("Verarbeitung abgeschlossen.")
-            st.success("Alle Daten wurden gelöscht!")
+    # Nur Platzhalter einsetzen, die auch in der Vorlage existieren
+    platzhalter = doc.get_undeclared_template_variables()
+    daten_fuer_vorlage = {k: v for k, v in daten.items() if k in platzhalter}
 
-            # Download-Button mit in-memory Bytes
-            st.download_button(
-                label="Erstelltes Anwaltsschreiben herunterladen",
-                data=docx_bytes,
-                file_name=os.path.basename(docx_pfad),
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            )
+    doc.render(daten_fuer_vorlage)
+    os.makedirs(os.path.dirname(ziel_pfad), exist_ok=True)
+    doc.save(ziel_pfad)
 
-        except Exception as e:
-            st.error(f"Fehler bei der Verarbeitung: {e}")
 
-# ==========================
-# Debug-Infos
-# ==========================
-with st.expander("Debug: Dateien im System anzeigen"):
-    st.subheader("Eingang Gutachten")
-    st.write(os.listdir(EINGANGS_ORDNER))
-    st.subheader("KI-Antworten")
-    st.write(os.listdir(KI_ANTWORT_ORDNER))
-    st.subheader("Ausgang-Schreiben")
-    st.write(os.listdir(AUSGANGS_ORDNER))
+def ki_datei_verarbeiten(pfad_ki_txt: str, vorlage_pfad: str) -> str:
+    with open(pfad_ki_txt, "r", encoding="utf-8") as f:
+        ki_text = f.read()
+
+    daten = json_aus_ki_antwort_parsen(ki_text)
+    platzhalter = extrahiere_platzhalter(vorlage_pfad)
+    daten = daten_nachbearbeiten(daten, platzhalter)
+
+    basisname = os.path.splitext(os.path.basename(pfad_ki_txt))[0]
+    datum_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ausgabe_name = f"{basisname}_schreiben_{datum_str}.docx"
+    ausgabe_pfad = os.path.join(AUSGANGS_ORDNER, ausgabe_name)
+
+    word_aus_vorlage_erstellen(daten, vorlage_pfad, ausgabe_pfad)
+    print(f"Fertiges Schreiben gespeichert: {ausgabe_pfad}")
+    return ausgabe_pfad
+
+
+def main(pfad_ki_txt: str = None, vorlage_pfad: str = None) -> str:
+    # Ordner wie gehabt sicherstellen
+    os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
+    os.makedirs(AUSGANGS_ORDNER, exist_ok=True)
+
+    # Vorlage MUSS von app.py übergeben werden (damit die Auswahl wirkt)
+    if vorlage_pfad is None:
+        raise ValueError("vorlage_pfad muss übergeben werden (Word-Vorlage .docx).")
+
+    if pfad_ki_txt is None:
+        # Suche neueste KI-Datei
+        dateien = [
+            os.path.join(KI_ANTWORT_ORDNER, f)
+            for f in os.listdir(KI_ANTWORT_ORDNER)
+            if f.endswith("_ki.txt")
+        ]
+        if not dateien:
+            raise FileNotFoundError("Keine KI-Datei gefunden.")
+        pfad_ki_txt = max(dateien, key=os.path.getmtime)
+
+    if not os.path.isfile(pfad_ki_txt):
+        raise FileNotFoundError(f"KI-Datei existiert nicht: {pfad_ki_txt}")
+
+    if not os.path.isfile(vorlage_pfad):
+        raise FileNotFoundError(f"Vorlage existiert nicht: {vorlage_pfad}")
+
+    return ki_datei_verarbeiten(pfad_ki_txt, vorlage_pfad)
+
+
+if __name__ == "__main__":
+    main()
