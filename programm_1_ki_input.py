@@ -13,7 +13,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EINGANGS_ORDNER = config.EINGANGS_ORDNER
 KI_ANTWORT_ORDNER = config.KI_ANTWORT_ORDNER
 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 # Erhöht, damit der obere Teil mit VS-Nr sicher drin ist.
 MAX_TEXT_CHARS = 100000
