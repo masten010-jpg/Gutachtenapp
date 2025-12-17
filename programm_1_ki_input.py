@@ -5,18 +5,55 @@ import pdfplumber
 from google import genai
 from google.genai import errors as genai_errors
 
+import config
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-EINGANGS_ORDNER = os.path.join(BASE_DIR, "eingang_gutachten")
-KI_ANTWORT_ORDNER = os.path.join(BASE_DIR, "ki_antworten")
+# Namen bleiben wie von dir, werden aber aus config befüllt (falls vorhanden)
+EINGANGS_ORDNER = config.EINGANGS_ORDNER
+KI_ANTWORT_ORDNER = config.KI_ANTWORT_ORDNER
 
 GEMINI_MODEL = "gemini-2.5-flash"
 
 # Erhöht, damit der obere Teil mit VS-Nr sicher drin ist.
 MAX_TEXT_CHARS = 100000
 KI_MAX_RETRIES = 3
-KI_TIMEOUT_SEKUNDEN = 60
+KI_TIMEOUT_SEKUNDEN = 60  # Hinweis: SDK-Timeout-Unterstützung ist je nach Version unterschiedlich
 MIN_TEXT_CHARS = 6000
+
+# ==========================
+# Prompt-Zusätze je Vorlage
+# ==========================
+PROMPT_ZUSATZ_STANDARD = ""
+
+PROMPT_ZUSATZ_WERTMINDERUNG = """
+ZUSATZMODUS: WERTMINDERUNG
+- Achte besonders auf Formulierungen wie "Wertminderung", "merkantile Wertminderung", "Minderwert".
+- Wenn ein konkreter Betrag genannt ist, trage ihn EXAKT in WERTMINDERUNG ein.
+- Wenn keine Zahl eindeutig genannt ist: WERTMINDERUNG = "".
+"""
+
+PROMPT_ZUSATZ_TOTALSCHADEN = """
+ZUSATZMODUS: TOTALSCHADEN
+- Achte besonders auf Indikatoren wie "Totalschaden", "wirtschaftlicher Totalschaden".
+- Extrahiere zusätzlich (falls eindeutig im Text vorhanden):
+  * WIEDERBESCHAFFUNGSWERT (WBW)
+  * RESTWERT
+  * WIEDERBESCHAFFUNGSDAUER (falls genannt)
+  * RESTWERTANGEBOT / RESTWERTBÖRSE (falls genannt)
+- Erfinde nichts. Wenn nicht eindeutig: "".
+WICHTIG:
+- Diese Zusatzfelder dürfen im JSON zusätzlich vorkommen (zusätzliche Keys sind erlaubt),
+  auch wenn sie nicht im Basis-JSON-Schema stehen.
+"""
+
+def prompt_zusatz_fuer_auswahl(auswahl: str) -> str:
+    if auswahl == "Totalschaden":
+        return PROMPT_ZUSATZ_TOTALSCHADEN
+    if auswahl == "Wertminderung":
+        return PROMPT_ZUSATZ_WERTMINDERUNG
+    return PROMPT_ZUSATZ_STANDARD
+
 
 PROMPT_TEMPLATE = """
 Du bist eine spezialisierte KI für die Auswertung von deutschsprachigen Kfz-Schadensgutachten.
@@ -120,7 +157,7 @@ AUSGABEFORMAT:
    - Schreibe das JSON zwischen die Marker JSON_START und JSON_END.
    - Innerhalb dieser Marker nur gültiges JSON, KEINE Kommentare, KEINE Erklärung.
    - Strings immer in Anführungszeichen.
-   - Verwende GENAU die folgenden Keys (nicht mehr, nicht weniger).
+   - Verwende GENAU die folgenden Keys (nicht mehr, nicht weniger) für das Basis-Schema.
 
 WICHTIGER HINWEIS:
 - Achte besonders darauf, dass das Feld "SCHADENSNUMMER" ausgefüllt wird,
@@ -198,8 +235,16 @@ def pdf_text_auslesen(pfad: str) -> str:
     return "\n".join(seiten_text)
 
 
-def prompt_bauen(gutachten_text: str) -> str:
-    return PROMPT_TEMPLATE.replace("{GUTACHTEN_TEXT}", gutachten_text)
+def prompt_bauen(gutachten_text: str, auswahl: str) -> str:
+    zusatz = prompt_zusatz_fuer_auswahl(auswahl)
+    prompt = PROMPT_TEMPLATE.replace("{GUTACHTEN_TEXT}", gutachten_text)
+
+    if zusatz:
+        prompt = prompt.replace(
+            "HIER IST DAS GUTACHTEN",
+            zusatz.strip() + "\n\nHIER IST DAS GUTACHTEN"
+        )
+    return prompt
 
 
 def ki_aufrufen(prompt_text: str) -> str:
@@ -208,6 +253,7 @@ def ki_aufrufen(prompt_text: str) -> str:
     for versuch in range(1, KI_MAX_RETRIES + 1):
         print(f"[DEBUG] Sende Request an Gemini – Versuch {versuch}/{KI_MAX_RETRIES}")
         try:
+            # Hinweis: Timeout je nach SDK-Version. Wenn dein SDK "timeout" unterstützt, kannst du ihn ergänzen.
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=prompt_text,
@@ -266,7 +312,7 @@ def neueste_pdf_finden(ordner: str) -> str | None:
     return neueste
 
 
-def main(pdf_pfad: str | None = None) -> str | None:
+def main(pdf_pfad: str | None = None, auswahl: str = "Standard") -> str | None:
     os.makedirs(EINGANGS_ORDNER, exist_ok=True)
     os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
 
@@ -300,8 +346,9 @@ def main(pdf_pfad: str | None = None) -> str | None:
         print(f"[DEBUG] Kürze Text auf die ersten {MAX_TEXT_CHARS} Zeichen.")
         gutachten_text = gutachten_text[:MAX_TEXT_CHARS]
 
-    prompt = prompt_bauen(gutachten_text)
+    prompt = prompt_bauen(gutachten_text, auswahl)
     print("[DEBUG] Prompt-Länge:", len(prompt), "Zeichen")
+    print(f"[DEBUG] Prompt-Modus/Vorlage: {auswahl}")
     print("Sende Gutachten an Gemini...")
 
     ki_antwort = ki_aufrufen(prompt)
