@@ -72,9 +72,8 @@ def extrahiere_platzhalter(vorlage_pfad):
 
 def baue_totalschaden(daten, platzhalter):
     """
-    Alte Hilfsfunktion aus deiner ersten Version – wir lassen sie drin,
-    falls du sie später wieder direkt brauchst.
-    Für die neue Logik nutzen wir aber 'anwenden_abrechnungslogik'.
+    Alte Hilfsfunktion aus deiner ersten Version – aktuell nicht zwingend genutzt,
+    bleibt aber erhalten, falls du sie direkt brauchst.
     """
     if "WIEDERBESCHAFFUNGSWERTAUFWAND" in platzhalter:
         wbw = euro_zu_float(daten.get("WIEDERBESCHAFFUNGSWERT", 0))
@@ -112,6 +111,15 @@ def anwenden_abrechnungslogik(daten: dict, auswahl: str, steuerstatus: str):
     daten["ABRECHNUNGSART"] = auswahl
     daten["STEUERSTATUS"] = steuerstatus
 
+    norm = (auswahl or "").lower()
+
+    # Flags für Varianten
+    is_totalschaden = "totalschaden" in norm
+    is_fiktiv = "fiktive abrechnung" in norm or ("standard" in norm and not is_totalschaden)
+    is_konkret = "konkrete abrechnung" in norm
+    is_130 = "130" in norm
+
+    # Rohwerte als Float
     reparatur = euro_zu_float(daten.get("REPARATURKOSTEN", ""))
     wertminderung = euro_zu_float(daten.get("WERTMINDERUNG", ""))
     kostenpausch = euro_zu_float(daten.get("KOSTENPAUSCHALE", ""))
@@ -124,59 +132,121 @@ def anwenden_abrechnungslogik(daten: dict, auswahl: str, steuerstatus: str):
 
     zus_betrag = euro_zu_float(daten.get("ZUSATZKOSTEN_BETRAG", ""))
 
-    # 130%-Regelung -> keine Wertminderung
-    if auswahl == "130%-Regelung":
+    # 130%-Regel -> keine Wertminderung
+    if is_130:
         daten["WERTMINDERUNG"] = ""
         wertminderung = 0.0
 
+    # -------------------------------
     # Totalschaden-Logik
-    if auswahl in ["Totalschaden fiktiv", "Totalschaden konkret", "Totalschaden Ersatzbeschaffung"]:
-        wba = max(wbw - restwert, 0.0)  # Wiederbeschaffungsaufwand
-        daten["WIEDERBESCHAFFUNGSAUFWAND"] = float_zu_euro(wba) if (wbw or restwert) else ""
+    # -------------------------------
+    if is_totalschaden:
+        # Wiederbeschaffungsaufwand
+        wba = max(wbw - restwert, 0.0)
+        daten["WIEDERBESCHAFFUNGSAUFWAND"] = float_zu_euro(wba) if wba > 0 else ""
 
-        reparatur = 0.0  # Totalschaden -> nicht reparaturbasiert
-        kostenbasis = wba
+        # Reparaturkosten spielen hier keine Rolle:
+        reparatur = 0.0
+        daten["REPARATURKOSTEN"] = ""
 
+        # Merkantile Wertminderung im Totalschaden meist nicht ersatzfähig,
+        # wir lassen den Wert aber so wie KI ihn liefert, es sei denn du willst ihn immer leeren.
+        # (Optional: wertminderung = 0.0; daten["WERTMINDERUNG"] = "")
+
+        # MwSt-Ersatz bei "konkret" / "Ersatzbeschaffung"
         ersatz_mwst = 0.0
-        if auswahl in ["Totalschaden konkret", "Totalschaden Ersatzbeschaffung"]:
+        if "konkret" in norm or "ersatzbeschaffung" in norm:
             ersatz_mwst = mwst
             daten["ERSATZBESCHAFFUNG_MWST"] = float_zu_euro(ersatz_mwst) if ersatz_mwst else ""
         else:
             daten["ERSATZBESCHAFFUNG_MWST"] = ""
 
+        # Steuerstatus
         if steuerstatus == "vorsteuerabzugsberechtigt":
             mwst_anzurechnen = 0.0
         else:
-            mwst_anzurechnen = ersatz_mwst if ersatz_mwst else 0.0
+            mwst_anzurechnen = ersatz_mwst
 
-        gesamt = kostenbasis + mwst_anzurechnen + kostenpausch + gutachter + nutzung + zus_betrag
+        # KOSTENSUMME_X = NUR Reparatur + Wertminderung + Kostenpauschale + Gutachterkosten
+        # -> hier typischerweise nur Kostenpauschale + Gutachterkosten
+        kosten_x = reparatur + wertminderung + kostenpausch + gutachter
 
-        daten["REPARATURKOSTEN"] = ""
-        daten["MWST_BETRAG"] = float_zu_euro(mwst) if mwst else ""
-        daten["KOSTENPAUSCHALE"] = float_zu_euro(kostenpausch) if kostenpausch else ""
-        daten["GUTACHTERKOSTEN"] = float_zu_euro(gutachter) if gutachter else ""
-        daten["NUTZUNGSAUSFALL"] = float_zu_euro(nutzung) if nutzung else ""
-        daten["KOSTENSUMME_X"] = float_zu_euro(kostenpausch + gutachter + nutzung + zus_betrag)
-        daten["GESAMTSUMME"] = float_zu_euro(gesamt)
+        # GESAMTSUMME = WBA + MwSt (anrechenbar) + KOSTENSUMME_X + Nutzungsausfall + Zusatzkosten
+        gesamt = wba + mwst_anzurechnen + kosten_x + nutzung + zus_betrag
+
+        # Formatierte Felder zurückschreiben
+        if wertminderung:
+            daten["WERTMINDERUNG"] = float_zu_euro(wertminderung)
+        if kostenpausch:
+            daten["KOSTENPAUSCHALE"] = float_zu_euro(kostenpausch)
+        if gutachter:
+            daten["GUTACHTERKOSTEN"] = float_zu_euro(gutachter)
+        if nutzung:
+            daten["NUTZUNGSAUSFALL"] = float_zu_euro(nutzung)
+        if zus_betrag:
+            daten["ZUSATZKOSTEN_BETRAG"] = float_zu_euro(zus_betrag)
+        if mwst:
+            daten["MWST_BETRAG"] = float_zu_euro(mwst)
+
+        daten["KOSTENSUMME_X"] = float_zu_euro(kosten_x) if kosten_x > 0 else ""
+        daten["GESAMTSUMME"] = float_zu_euro(gesamt) if gesamt > 0 else ""
+
         return daten
 
-    # Reparaturschäden: Fiktiv / Konrekt < WBW / 130%
-    if auswahl == "Fiktive Abrechnung (Reparaturschaden)":
-        daten["MWST_BETRAG"] = ""  # keine MwSt bei fiktiv
-    elif auswahl == "Konkrete Abrechnung < WBW":
-        daten["MWST_BETRAG"] = float_zu_euro(mwst) if mwst else ""
-    elif auswahl == "130%-Regelung":
-        daten["MWST_BETRAG"] = float_zu_euro(mwst) if mwst else ""
+    # -------------------------------
+    # Reparaturschäden (fiktiv / konkret / 130%)
+    # -------------------------------
 
-    daten["REPARATURKOSTEN"] = float_zu_euro(reparatur) if reparatur else (daten.get("REPARATURKOSTEN", "") or "")
-    daten["WERTMINDERUNG"] = float_zu_euro(wertminderung) if wertminderung else (daten.get("WERTMINDERUNG", "") or "")
-    daten["KOSTENPAUSCHALE"] = float_zu_euro(kostenpausch) if kostenpausch else (daten.get("KOSTENPAUSCHALE", "") or "")
-    daten["GUTACHTERKOSTEN"] = float_zu_euro(gutachter) if gutachter else (daten.get("GUTACHTERKOSTEN", "") or "")
-    daten["NUTZUNGSAUSFALL"] = float_zu_euro(nutzung) if nutzung else (daten.get("NUTZUNGSAUSFALL", "") or "")
+    # MwSt-Behandlung:
+    if is_fiktiv:
+        # Fiktive Abrechnung -> keine MwSt-Position
+        daten["MWST_BETRAG"] = ""
+        mwst = 0.0
+    else:
+        # Konkrete Abrechnung / 130%
+        if mwst:
+            daten["MWST_BETRAG"] = float_zu_euro(mwst)
+        else:
+            daten["MWST_BETRAG"] = daten.get("MWST_BETRAG", "") or ""
 
-    kosten_x = reparatur + wertminderung + kostenpausch + gutachter + nutzung + zus_betrag
-    daten["KOSTENSUMME_X"] = float_zu_euro(kosten_x) if kosten_x else ""
-    daten["GESAMTSUMME"] = daten["KOSTENSUMME_X"]
+    # Jetzt formatiert zurückschreiben
+    if reparatur:
+        daten["REPARATURKOSTEN"] = float_zu_euro(reparatur)
+    else:
+        daten["REPARATURKOSTEN"] = daten.get("REPARATURKOSTEN", "") or ""
+
+    if wertminderung:
+        daten["WERTMINDERUNG"] = float_zu_euro(wertminderung)
+    else:
+        daten["WERTMINDERUNG"] = daten.get("WERTMINDERUNG", "") or ""
+
+    if kostenpausch:
+        daten["KOSTENPAUSCHALE"] = float_zu_euro(kostenpausch)
+    else:
+        daten["KOSTENPAUSCHALE"] = daten.get("KOSTENPAUSCHALE", "") or ""
+
+    if gutachter:
+        daten["GUTACHTERKOSTEN"] = float_zu_euro(gutachter)
+    else:
+        daten["GUTACHTERKOSTEN"] = daten.get("GUTACHTERKOSTEN", "") or ""
+
+    if nutzung:
+        daten["NUTZUNGSAUSFALL"] = float_zu_euro(nutzung)
+    else:
+        daten["NUTZUNGSAUSFALL"] = daten.get("NUTZUNGSAUSFALL", "") or ""
+
+    if zus_betrag:
+        daten["ZUSATZKOSTEN_BETRAG"] = float_zu_euro(zus_betrag)
+    else:
+        daten["ZUSATZKOSTEN_BETRAG"] = daten.get("ZUSATZKOSTEN_BETRAG", "") or ""
+
+    # KOSTENSUMME_X = NUR Reparatur + Wertminderung + Kostenpauschale + Gutachterkosten
+    kosten_x = reparatur + wertminderung + kostenpausch + gutachter
+    daten["KOSTENSUMME_X"] = float_zu_euro(kosten_x) if kosten_x > 0 else ""
+
+    # GESAMTSUMME = KOSTENSUMME_X + Nutzungsausfall + Zusatzkosten
+    gesamt = kosten_x + nutzung + zus_betrag
+    daten["GESAMTSUMME"] = float_zu_euro(gesamt) if gesamt > 0 else ""
 
     return daten
 
@@ -200,7 +270,7 @@ def daten_nachbearbeiten(
 
     daten = anwenden_abrechnungslogik(daten, auswahl, steuerstatus)
 
-    # optionale Zusatzberechnung, falls Vorlage WIEDERBESCHAFFUNGSAUFWAND erwartet
+    # Falls Vorlage explizit WIEDERBESCHAFFUNGSAUFWAND hat und noch leer ist, nachziehen
     if "WIEDERBESCHAFFUNGSAUFWAND" in platzhalter and not daten.get("WIEDERBESCHAFFUNGSAUFWAND"):
         wbw = euro_zu_float(daten.get("WIEDERBESCHAFFUNGSWERT", ""))
         rest = euro_zu_float(daten.get("RESTWERT", ""))
