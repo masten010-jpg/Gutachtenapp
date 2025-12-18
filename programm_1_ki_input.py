@@ -9,120 +9,105 @@ import config
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Namen bleiben wie von dir, werden aber aus config befüllt (falls vorhanden)
 EINGANGS_ORDNER = config.EINGANGS_ORDNER
 KI_ANTWORT_ORDNER = config.KI_ANTWORT_ORDNER
 
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-2.5-flash"
 
-# Erhöht, damit der obere Teil mit VS-Nr sicher drin ist.
 MAX_TEXT_CHARS = 100000
 KI_MAX_RETRIES = 3
-KI_TIMEOUT_SEKUNDEN = 60  # Hinweis: SDK-Timeout-Unterstützung ist je nach Version unterschiedlich
 MIN_TEXT_CHARS = 6000
 
 # ==========================
-# Prompt-Zusätze je Vorlage
+# Prompt-Zusätze je Variante
 # ==========================
-PROMPT_ZUSATZ_STANDARD = ""
-
-PROMPT_ZUSATZ_WERTMINDERUNG = """
-ZUSATZMODUS: WERTMINDERUNG
-- Achte besonders auf Formulierungen wie "Wertminderung", "merkantile Wertminderung", "Minderwert".
-- Wenn ein konkreter Betrag genannt ist, trage ihn EXAKT in WERTMINDERUNG ein.
-- Wenn keine Zahl eindeutig genannt ist: WERTMINDERUNG = "".
+def prompt_zusatz(auswahl: str, steuerstatus: str) -> str:
+    basis = f"""
+KONTEXT:
+- Gewählte Abrechnungsvariante: {auswahl}
+- Steuerstatus des Geschädigten: {steuerstatus}
 """
-
-PROMPT_ZUSATZ_TOTALSCHADEN = """
-ZUSATZMODUS: TOTALSCHADEN
-- Achte besonders auf Indikatoren wie "Totalschaden", "wirtschaftlicher Totalschaden".
-- Extrahiere zusätzlich (falls eindeutig im Text vorhanden):
-  * WIEDERBESCHAFFUNGSWERT (WBW)
-  * RESTWERT
-  * WIEDERBESCHAFFUNGSDAUER (falls genannt)
-  * RESTWERTANGEBOT / RESTWERTBÖRSE (falls genannt)
-- Erfinde nichts. Wenn nicht eindeutig: "".
-WICHTIG:
-- Diese Zusatzfelder dürfen im JSON zusätzlich vorkommen (zusätzliche Keys sind erlaubt),
-  auch wenn sie nicht im Basis-JSON-Schema stehen.
+    if auswahl == "Standard":
+        return basis + """
+REGELN:
+- Klassischer Reparaturschaden, keine besondere 130%- oder Totalschadenlogik.
+- Wenn nach Gutachten fiktiv abgerechnet wird (keine Reparaturrechnung): Reparaturkosten NETTO.
+- Wenn eine konkrete Reparaturrechnung ersichtlich ist: Reparaturkosten BRUTTO und MwSt-Betrag, falls ausgewiesen.
+- Merkantiler Minderwert (Wertminderung) ist steuerneutral und wird NETTO berücksichtigt.
 """
-
-def prompt_zusatz_fuer_auswahl(auswahl: str) -> str:
-    if auswahl == "Totalschaden":
-        return PROMPT_ZUSATZ_TOTALSCHADEN
     if auswahl == "Wertminderung":
-        return PROMPT_ZUSATZ_WERTMINDERUNG
-    return PROMPT_ZUSATZ_STANDARD
-
+        return basis + """
+REGELN:
+- Fokus auf merkantiler Wertminderung.
+- Extrahiere unbedingt den Betrag der Wertminderung (merkantiler Minderwert), falls genannt.
+- Wertminderung ist steuerneutral und wird NETTO angegeben.
+- Reparaturkosten, Kostenpauschale, Gutachterkosten, Nutzungsausfall, soweit vorhanden, ebenfalls extrahieren.
+"""
+    if auswahl == "Totalschaden":
+        return basis + """
+REGELN:
+- TOTALSCHADEN: Reparaturkosten übersteigen grundsätzlich den Wiederbeschaffungswert (WBW).
+- WICHTIG: Extrahiere WIEDERBESCHAFFUNGSWERT (WBW) und RESTWERT des Fahrzeugs.
+- Berechnungsbasis ist der Wiederbeschaffungsaufwand = WBW - Restwert.
+- Ob netto oder brutto abgerechnet wird, hängt vom Steuerstatus ab:
+  * Vorsteuerabzugsberechtigt: Netto-Ausgleich
+  * Nicht vorsteuerabzugsberechtigt: Bruttowerte, soweit im Gutachten erkennbar
+- Extrahiere ggf. Hinweise auf MwSt im WBW oder in der Ersatzbeschaffung.
+"""
+    return basis
 
 PROMPT_TEMPLATE = """
 Du bist eine spezialisierte KI für die Auswertung von deutschsprachigen Kfz-Schadensgutachten.
-Deine einzige Aufgabe ist es, bestimmte Informationen GENAU so aus dem Text zu EXTRAHIEREN,
-wie sie dort stehen (Namen, Adressen, Orte, Daten, Kennzeichen, Geldbeträge, Textpassagen).
 
-WICHTIG:
-- Erfinde KEINE Daten. Wenn etwas nicht eindeutig im Text steht, setze den Wert auf "".
-- Rate NICHT. Lieber "" als eine Vermutung.
-- Nutze den Original-Wortlaut aus dem Gutachten (z.B. Straßennamen, Ortsnamen).
-- Antworte ausschließlich auf DEUTSCH.
-- Halte dich EXAKT an die vorgegebenen Feldnamen und an das Ausgabeschema.
+Deine Aufgabe:
+- Extrahiere Informationen exakt aus dem Text (ohne Erfinden, ohne Raten).
+- Wenn etwas nicht eindeutig im Text steht: "" (leer).
+- Antworte auf Deutsch.
+- Halte das JSON-Format gültig und exakt.
 
-BESONDERS WICHTIGE FELDER (NICHT LEER LASSEN, WENN IM TEXT IRGENDWO ERWÄHNT):
+BESONDERS WICHTIGE FELDER:
 
 1. UNFALL_DATUM / UNFALL_UHRZEIT:
    - Suche nach Formulierungen wie: "am 17.02.2025", "am 17.02.2025 gegen 14:30 Uhr", "Unfallzeit", "Unfalltag".
-   - Gib das Datum im Format "TT.MM.JJJJ" zurück (z.B. "17.02.2025").
-   - Gib die Uhrzeit im Format "HH:MM" zurück (z.B. "14:30").
+   - Gib das Datum im Format "TT.MM.JJJJ" zurück.
+   - Gib die Uhrzeit im Format "HH:MM" zurück.
 
 2. UNFALLORT / UNFALL_STRASSE:
-   - Suche nach Formulierungen wie: "im Bereich", "in Höhe von", "auf der Straße", "an der Kreuzung", "Unfallort".
-   - UNFALLORT ist typischerweise "Stadt / Ort", UNFALL_STRASSE ist typischerweise "Straßenname + Hausnummer / Kreuzung".
+   - UNFALLORT = Ort/Stadt.
+   - UNFALL_STRASSE = Straßenname + Hausnummer/Kreuzung, soweit erkennbar.
 
 3. POLIZEIAKTE_NUMMER:
    - Suche nach Angaben wie "Aktenzeichen", "Polizeivorgangsnummer", "Vorgangsnummer", "Geschäftszeichen" im Zusammenhang mit Polizei.
-   - Wenn du eine solche Nummer findest, trage sie in POLIZEIAKTE_NUMMER ein.
 
-4. SCHADENHERGANG:
-   - Suche nach einer Überschrift wie "Schadenhergang", "Schadenshergang" oder einer sehr ähnlichen Formulierung.
-   - Wenn es keine solche Überschrift gibt, suche nach "Unfallhergang" oder "Sachverhalt".
-   - Für SCHADENHERGANG sollst du den TEXTABSCHNITT UNTERHALB DIESER ÜBERSCHRIFT möglichst WÖRTLICH übernehmen.
-   - KEINE UMSCHREIBUNG, KEINE ZUSAMMENFASSUNG, KEINE eigenen Formulierungen. So nah wie möglich am Original.
-   - Typischerweise endet der Abschnitt beim nächsten Überschriftstitel oder einem deutlichen Themenwechsel.
-   - Wenn du keine passende Überschrift findest, setze SCHADENHERGANG auf "".
+4. SCHADENSNUMMER:
+   - Suche nach "Schadensnummer", "Schaden-Nr.", "Schaden-Nummer".
+   - Alternativ: "Versicherungsnummer", "Versicherungsschein-Nr.", "VS-Nr", "VSNR" etc.
+   - Wenn sowohl eine echte Schadensnummer als auch eine Versicherungsnummer vorkommen:
+     -> Nur die Schadensnummer als SCHADENSNUMMER verwenden.
+   - Wenn nur eine Versicherungsnummer o.ä. vorkommt:
+     -> Diese als SCHADENSNUMMER verwenden.
+   - Erfinde nichts.
 
-5. FRIST_DATUM:
-   - Dieses Feld lässt du LEER (""), es wird später automatisch vom System gesetzt (14 Tage ab Datum des Schreibens).
+5. SCHADENHERGANG:
+   - Suche nach einer Überschrift "Schadenhergang", "Schadenshergang", "Unfallhergang", "Sachverhalt" o.ä.
+   - Gib den Textabschnitt darunter möglichst WÖRTLICH wieder (kein Umschreiben, keine eigene Zusammenfassung).
 
-6. SCHADENSNUMMER:
-   - Suche nach Angaben wie "Schadensnummer", "Schaden-Nr.", "Schaden-Nr", "Schaden-Nummer".
-   - Berücksichtige außerdem Bezeichnungen wie:
-     "Versicherungsnummer", "Versicherungsschein-Nr.", "VS-Nr", "VS_Nr", "VS Nr.", "VSNR".
-   - WICHTIGE PRIORITÄT:
-     a) Wenn sowohl eine "Schadensnummer / Schaden-Nr." als auch eine "Versicherungsnummer / VS-Nr / Versicherungsschein-Nr." genannt sind:
-        - Verwende ALS SCHADENSNUMMER NUR die "Schadensnummer / Schaden-Nr.".
-     b) Wenn KEINE eigenständige "Schadensnummer / Schaden-Nr." genannt ist,
-        aber eine "Versicherungsnummer / VS-Nr / Versicherungsschein-Nr." vorhanden ist:
-        - Verwende diese Nummer als SCHADENSNUMMER.
-   - Gib die Nummer EXAKT so zurück, wie sie im Text steht (inkl. / - . / etc.).
-   - Wenn wirklich keine passende Nummer erkennbar ist, setze SCHADENSNUMMER auf "" (leer)
-     und erfinde nichts.
+6. FRIST_DATUM und HEUTDATUM:
+   - Beide Felder bleiben im JSON LEER ("").
+   - Sie werden später im System gesetzt.
 
-7. AKTENZEICHEN:
-   - Suche nach "Aktenzeichen", "Az.", "AZ:" außerhalb des Polizeikontexts, z.B. als internes Aktenzeichen, Kanzlei- oder Gerichtszeichen.
-   - Wenn ein solches Aktenzeichen vorhanden ist, gib es EXAKT so zurück.
-   - Wenn kein Aktenzeichen erkennbar ist, setze "".
+KOSTENFELDER (sofern im Text eindeutig vorhanden):
+- REPARATURKOSTEN
+- WERTMINDERUNG (merkantiler Minderwert)
+- KOSTENPAUSCHALE
+- GUTACHTERKOSTEN
+- NUTZUNGSAUSFALL
+- MWST_BETRAG
+- WIEDERBESCHAFFUNGSWERT (WBW)
+- RESTWERT
 
-8. HEUTDATUM:
-   - Dieses Feld lässt du LEER ("").
-   - Es wird vom System automatisch mit dem Datum der Verarbeitung/Upload gefüllt.
-
-9. Kostenpauschale:
-   - Hierunter fallen pauschale Kosten wie Fahrkostenpauschale, Porto- und Telefonpauschale
-     oder ähnlich bezeichnete Pauschalbeträge.
-
-AUSGABEFORMAT:
-
-1. Zuerst eine gut lesbare Stichpunktliste im folgenden Schema:
+AUSGABE:
+1) Zuerst eine gut lesbare Stichpunktliste im Schema:
 
    Mandant Vorname: ...
    Mandant Nachname: ...
@@ -139,33 +124,21 @@ AUSGABEFORMAT:
    Kennzeichen: ...
    Fahrzeug Kennzeichen: ...
 
-   Polizei Aktennummer (VG/.../...): ...
+   Polizei Aktennummer: ...
    Schadensnummer: ...
    Aktenzeichen: ...
 
    Schadenhergang (Originaltext aus dem Gutachten): ...
    Reparaturkosten: ...
    Wertminderung: ...
+   Nutzungsausfall: ...
    Kostenpauschale: ...
    Gutachterkosten: ...
-   Kostensumme X (Reparatur + Wertminderung + Kostenpauschale + Gutachterkosten): ...
+   Wiederbeschaffungswert: ...
+   Restwert: ...
+   MwSt-Betrag (falls relevant): ...
 
-   Heutiges Datum (wird vom System gesetzt): ...
-
-2. Danach gibst du GENAU die gleichen Informationen als reines JSON aus.
-   WICHTIG:
-   - Schreibe das JSON zwischen die Marker JSON_START und JSON_END.
-   - Innerhalb dieser Marker nur gültiges JSON, KEINE Kommentare, KEINE Erklärung.
-   - Strings immer in Anführungszeichen.
-   - Verwende GENAU die folgenden Keys (nicht mehr, nicht weniger) für das Basis-Schema.
-
-WICHTIGER HINWEIS:
-- Achte besonders darauf, dass das Feld "SCHADENSNUMMER" ausgefüllt wird,
-  wenn irgendwo im Gutachten eine Schadensnummer / Schaden-Nr. oder eine Versicherungsnummer / VS-Nr
-  im Zusammenhang mit der Regulierung genannt ist.
-- Wenn eine solche Nummer vorhanden ist, darf "SCHADENSNUMMER" NICHT leer bleiben.
-
-JSON-FORMAT (verwende GENAU diese Keys):
+2) Danach GENAU die gleichen Informationen als JSON zwischen JSON_START und JSON_END.
 
 JSON_START
 {
@@ -194,38 +167,35 @@ JSON_START
   "WERTMINDERUNG": "",
   "KOSTENPAUSCHALE": "",
   "GUTACHTERKOSTEN": "",
-  "KOSTENSUMME_X": "",
+  "NUTZUNGSAUSFALL": "",
+  "MWST_BETRAG": "",
+
+  "WIEDERBESCHAFFUNGSWERT": "",
+  "RESTWERT": "",
 
   "FRIST_DATUM": "",
   "HEUTDATUM": ""
 }
 JSON_END
 
-HIER IST DAS GUTACHTEN (nur ein Ausschnitt, aber benutze so viele Infos wie möglich daraus):
+HIER IST DER ZUSÄTZLICHE KONTEXT ZUR ABRECHNUNG:
+{ZUSATZ}
 
+HIER IST DAS GUTACHTEN (Textauszug, nutze möglichst viele Infos daraus):
 {GUTACHTEN_TEXT}
 """
 
-
 def get_gemini_client():
-    """API-Key aus Env oder Streamlit-Secrets holen und Client bauen."""
     api_key = os.getenv("GEMINI_API_KEY")
-
     if not api_key:
         try:
             import streamlit as st
             api_key = st.secrets.get("GEMINI_API_KEY")
         except Exception:
             api_key = None
-
     if not api_key:
-        raise RuntimeError(
-            "GEMINI_API_KEY ist nicht gesetzt. "
-            "Bitte als Umgebungsvariable oder in Streamlit-Secrets hinterlegen."
-        )
-
+        raise RuntimeError("GEMINI_API_KEY ist nicht gesetzt.")
     return genai.Client(api_key=api_key)
-
 
 def pdf_text_auslesen(pfad: str) -> str:
     seiten_text = []
@@ -234,131 +204,80 @@ def pdf_text_auslesen(pfad: str) -> str:
             seiten_text.append(seite.extract_text() or "")
     return "\n".join(seiten_text)
 
-
-def prompt_bauen(gutachten_text: str, auswahl: str) -> str:
-    zusatz = prompt_zusatz_fuer_auswahl(auswahl)
+def prompt_bauen(gutachten_text: str, auswahl: str, steuerstatus: str) -> str:
+    zusatz = prompt_zusatz(auswahl, steuerstatus)
     prompt = PROMPT_TEMPLATE.replace("{GUTACHTEN_TEXT}", gutachten_text)
-
-    if zusatz:
-        prompt = prompt.replace(
-            "HIER IST DAS GUTACHTEN",
-            zusatz.strip() + "\n\nHIER IST DAS GUTACHTEN"
-        )
+    prompt = prompt.replace("{ZUSATZ}", zusatz.strip())
     return prompt
-
 
 def ki_aufrufen(prompt_text: str) -> str:
     client = get_gemini_client()
-
     for versuch in range(1, KI_MAX_RETRIES + 1):
-        print(f"[DEBUG] Sende Request an Gemini – Versuch {versuch}/{KI_MAX_RETRIES}")
         try:
-            # Hinweis: Timeout je nach SDK-Version. Wenn dein SDK "timeout" unterstützt, kannst du ihn ergänzen.
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=prompt_text,
             )
-            text = response.text
-            print("[DEBUG] KI-Antwort erfolgreich empfangen.")
-            return text
-
+            return response.text
         except genai_errors.ClientError as e:
-            msg = f"Gemini ClientError: {e}"
-            print(msg)
             if versuch == KI_MAX_RETRIES:
-                raise RuntimeError(msg) from e
-            print("Warte 5 Sekunden und versuche es erneut...")
+                raise RuntimeError(f"Gemini ClientError: {e}") from e
             time.sleep(5)
-
-        except Exception as e:
-            print("Allgemeiner Fehler beim Aufruf von Gemini:", e)
+        except Exception:
             if versuch == KI_MAX_RETRIES:
                 raise
-            print("Warte 5 Sekunden und versuche es erneut...")
             time.sleep(5)
-
 
 def ki_antwort_speichern(basisname: str, ki_text: str) -> str:
     os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
     ziel_pfad = os.path.join(KI_ANTWORT_ORDNER, basisname + "_ki.txt")
     with open(ziel_pfad, "w", encoding="utf-8") as f:
         f.write(ki_text)
-    print(f"KI-Antwort gespeichert: {ziel_pfad}")
     return ziel_pfad
 
-
 def neueste_pdf_finden(ordner: str) -> str | None:
-    print(f"[DEBUG] Absoluter Ordnerpfad: {ordner}")
     if not os.path.isdir(ordner):
-        print("[DEBUG] Ordner existiert NICHT!")
         return None
-
-    alle_dateien = os.listdir(ordner)
-    print(f"[DEBUG] Dateien im Ordner: {alle_dateien}")
-
     pdf_pfade = []
-    for datei in alle_dateien:
+    for datei in os.listdir(ordner):
         datei_clean = datei.strip()
         if datei_clean.lower().endswith(".pdf"):
-            vollpfad = os.path.join(ordner, datei_clean)
-            pdf_pfade.append(vollpfad)
-
-    print(f"[DEBUG] Erkannte PDF-Dateien: {pdf_pfade}")
-
+            pdf_pfade.append(os.path.join(ordner, datei_clean))
     if not pdf_pfade:
         return None
+    return max(pdf_pfade, key=os.path.getmtime)
 
-    neueste = max(pdf_pfade, key=os.path.getmtime)
-    return neueste
-
-
-def main(pdf_pfad: str | None = None, auswahl: str = "Standard") -> str | None:
+def main(
+    pdf_pfad: str | None = None,
+    auswahl: str = "Standard",
+    steuerstatus: str = "nicht vorsteuerabzugsberechtigt"
+) -> str | None:
     os.makedirs(EINGANGS_ORDNER, exist_ok=True)
     os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)
 
     if pdf_pfad is None:
-        print("Base dir:", BASE_DIR)
-        print("Suche neueste PDF in:", EINGANGS_ORDNER)
         neueste_pdf = neueste_pdf_finden(EINGANGS_ORDNER)
-
         if neueste_pdf is None:
-            print("Keine PDF-Datei im Ordner gefunden.")
             raise RuntimeError("Kein Gutachten gefunden. Laden Sie ein Gutachten hoch!")
-
         zu_verarbeitende_pdf = neueste_pdf
     else:
         zu_verarbeitende_pdf = pdf_pfad
 
-    print(f"PDF wird verarbeitet: {zu_verarbeitende_pdf}")
-
     voller_text = pdf_text_auslesen(zu_verarbeitende_pdf)
-    print("[DEBUG] Länge des vollen Gutachten-Textes:", len(voller_text), "Zeichen")
 
     if not voller_text or len(voller_text.strip()) < MIN_TEXT_CHARS:
-        print("Zu wenig verwertbarer Text im Dokument. Abbruch.")
         raise RuntimeError(
             "Das hochgeladene Dokument enthält zu wenig verwertbare Informationen. "
             "Laden Sie ein vollständiges Gutachten hoch!"
         )
 
-    gutachten_text = voller_text
-    if len(gutachten_text) > MAX_TEXT_CHARS:
-        print(f"[DEBUG] Kürze Text auf die ersten {MAX_TEXT_CHARS} Zeichen.")
-        gutachten_text = gutachten_text[:MAX_TEXT_CHARS]
-
-    prompt = prompt_bauen(gutachten_text, auswahl)
-    print("[DEBUG] Prompt-Länge:", len(prompt), "Zeichen")
-    print(f"[DEBUG] Prompt-Modus/Vorlage: {auswahl}")
-    print("Sende Gutachten an Gemini...")
-
+    gutachten_text = voller_text[:MAX_TEXT_CHARS]
+    prompt = prompt_bauen(gutachten_text, auswahl, steuerstatus)
     ki_antwort = ki_aufrufen(prompt)
 
     basisname = os.path.splitext(os.path.basename(zu_verarbeitende_pdf))[0]
     pfad_ki = ki_antwort_speichern(basisname, ki_antwort)
-
-    print("Fertig. Diese eine PDF wurde verarbeitet.")
     return pfad_ki
-
 
 if __name__ == "__main__":
     main()
