@@ -12,11 +12,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EINGANGS_ORDNER = config.EINGANGS_ORDNER
 KI_ANTWORT_ORDNER = config.KI_ANTWORT_ORDNER
 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-2.5"
 
-MAX_TEXT_CHARS = 100000
+MAX_TEXT_CHARS = 1000000
 KI_MAX_RETRIES = 3
-MIN_TEXT_CHARS = 6000
+MIN_TEXT_CHARS = 60000
 
 # ==========================
 # Prompt-Zusätze je Variante
