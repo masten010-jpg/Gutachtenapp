@@ -18,7 +18,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EINGANGS_ORDNER = config.EINGANGS_ORDNER
 KI_ANTWORT_ORDNER = config.KI_ANTWORT_ORDNER
-AUSGANGS_ORDNER = os.path.join(BASE_DIR, "ausgang_schreiben")  # bleibt wie bei dir
+AUSGANGS_ORDNER = os.path.join(BASE_DIR, "ausgang_schreiben")
 
 os.makedirs(EINGANGS_ORDNER, exist_ok=True)
 os.makedirs(AUSGANGS_ORDNER, exist_ok=True)
@@ -43,7 +43,6 @@ def load_users() -> dict:
     try:
         with open(USERS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # erwartet: {"username": "bcrypt_hash", ...}
         if isinstance(data, dict):
             return data
     except Exception:
@@ -68,7 +67,6 @@ def check_password(plain_password: str, stored_hash: str) -> bool:
         return False
 
 def valid_username(name: str) -> bool:
-    # simpel & robust: nur Buchstaben/Zahlen/_/-
     if not name or len(name) < 3 or len(name) > 32:
         return False
     for ch in name:
@@ -77,16 +75,18 @@ def valid_username(name: str) -> bool:
     return True
 
 def valid_password(pw: str) -> bool:
-    # MVP-Regeln (kannst du später verschärfen)
     return isinstance(pw, str) and len(pw) >= 10
 
 # ==========================
-# Vorlagen
+# Vorlagen (NEU: deine 6 Abrechnungsvarianten)
 # ==========================
 VORLAGEN = {
-    "Standard": "vorlage_schreiben.docx",
-    "Wertminderung": "vorlage_schreibenwertmind.docx",
-    "Totalschaden": "vorlage_schreibentotalschaden.docx"
+    "Fiktive Abrechnung (Reparaturschaden)": "vorlage_fiktive_abrechnung.docx",
+    "Konkrete Abrechnung < WBW": "vorlage_konkret_unter_wbw.docx",
+    "130%-Regelung": "vorlage_130_prozent.docx",
+    "Totalschaden fiktiv": "vorlage_totalschaden_fiktiv.docx",
+    "Totalschaden konkret": "vorlage_totalschaden_konkret.docx",
+    "Totalschaden Ersatzbeschaffung": "vorlage_totalschaden_ersatzbeschaffung.docx",
 }
 
 # ==========================
@@ -111,23 +111,18 @@ def resolve_vorlage_pfad(auswahl: str) -> str:
 
     dateiname = VORLAGEN[auswahl]
 
-    # 1) Wenn Standard: bevorzugt config.DEFAULT_VORLAGE
-    if auswahl == "Standard":
-        if getattr(config, "DEFAULT_VORLAGE", None) and os.path.isfile(config.DEFAULT_VORLAGE):
-            return config.DEFAULT_VORLAGE
-
-    # 2) Vorlagenordner
+    # 1) Vorlagenordner aus config
     if getattr(config, "VORLAGEN_ORDNER", None):
         pfad1 = os.path.join(config.VORLAGEN_ORDNER, dateiname)
         if os.path.isfile(pfad1):
             return pfad1
 
-    # 3) BASE_DIR fallback
+    # 2) BASE_DIR fallback
     pfad2 = os.path.join(BASE_DIR, dateiname)
     if os.path.isfile(pfad2):
         return pfad2
 
-    # 4) falls absolute Pfade in VORLAGEN stehen
+    # 3) falls absolute Pfade in VORLAGEN stehen
     if os.path.isabs(dateiname) and os.path.isfile(dateiname):
         return dateiname
 
@@ -173,10 +168,8 @@ def login_user(username: str, pw: str) -> tuple[bool, str]:
     users = load_users()
     stored_hash = users.get(username)
 
-    # Immer gleiche Fehlermeldung, um User-Enum zu vermeiden
     if not stored_hash or not check_password(pw, stored_hash):
         st.session_state["login_fail_count"] += 1
-        # nach 5 Fehlversuchen: 30 Sekunden blocken
         if st.session_state["login_fail_count"] >= 5:
             st.session_state["login_block_until"] = time.time() + 30
             st.session_state["login_fail_count"] = 0
@@ -197,8 +190,6 @@ if not st.session_state["logged_in"]:
     users = load_users()
     allow_registration = True
 
-    # Optional: Registrierung nur erlauben, wenn noch keine Nutzer existieren (wirklich "einmalig" global)
-    # -> Falls du stattdessen "pro User einmalig" meinst: setze die nächste Zeile auf False
     EINMALIGE_REGISTRIERUNG_GLOBAL = False
     if EINMALIGE_REGISTRIERUNG_GLOBAL and len(users) > 0:
         allow_registration = False
@@ -228,7 +219,6 @@ if not st.session_state["logged_in"]:
                 st.error(msg)
         st.stop()
 
-    # Login
     login_clicked = st.button("Login")
     if login_clicked:
         ok, msg = login_user(username.strip(), pw)
@@ -251,20 +241,39 @@ if st.button("Logout"):
     st.rerun()
 
 # ==========================
-# Vorlage auswählen
+# 1. Vorlage / Abrechnungsvariante auswählen
 # ==========================
-st.header("1. Schreiben Vorlage wählen")
-auswahl = st.selectbox("Welche Vorlage möchten Sie verwenden?", list(VORLAGEN.keys()))
+st.header("1. Abrechnungsvariante / Vorlage wählen")
+auswahl = st.selectbox("Welche Variante möchten Sie verwenden?", list(VORLAGEN.keys()))
 try:
     vorlage_pfad = resolve_vorlage_pfad(auswahl)
 except Exception as e:
     st.error(f"Vorlagenfehler: {e}")
     st.stop()
 
+st.caption(f"Verwendete Vorlage-Datei: {os.path.basename(vorlage_pfad)}")
+
 # ==========================
-# PDF Upload & Verarbeitung
+# 2. Steuerstatus wählen
 # ==========================
-st.header("2. Gutachten hochladen, verarbeiten und Schreiben herunterladen")
+st.header("2. Steuerstatus (relevant für MwSt / Totalschaden)")
+steuerstatus = st.selectbox(
+    "Steuerstatus des Geschädigten",
+    ["nicht vorsteuerabzugsberechtigt", "vorsteuerabzugsberechtigt"],
+    index=0
+)
+
+# ==========================
+# 3. Optionaler Zusatzkosten-Posten
+# ==========================
+st.header("3. Optional: Zusatzkosten")
+zusatzkosten_bezeichnung = st.text_input("Bezeichnung (optional)", value="")
+zusatzkosten_betrag = st.text_input("Betrag in Euro (optional, z.B. 25,00)", value="")
+
+# ==========================
+# 4. PDF Upload & Verarbeitung
+# ==========================
+st.header("4. Gutachten hochladen, verarbeiten und Schreiben herunterladen")
 uploaded_file = st.file_uploader("Gutachten als PDF hochladen", type=["pdf"])
 
 if st.button("Gutachten verarbeiten"):
@@ -287,14 +296,21 @@ if st.button("Gutachten verarbeiten"):
 
     try:
         with st.spinner("Verarbeite Gutachten mit KI..."):
-            # 1) KI-Programm (mit auswahl -> prompt passend zur Vorlage)
-            pfad_ki = programm_1_ki_input.main(pdf_path, auswahl)
+            # 1) KI-Programm: Abrechnungsart + Steuerstatus mitgeben
+            pfad_ki = programm_1_ki_input.main(pdf_path, auswahl, steuerstatus)
 
             if pfad_ki is None or not os.path.isfile(pfad_ki):
                 raise RuntimeError("Programm 1 hat keine gültige KI-Antwort erzeugt.")
 
-            # 2) Word-Dokument erzeugen
-            docx_pfad = programm_2_word_output.main(pfad_ki, vorlage_pfad)
+            # 2) Word-Dokument erzeugen: inkl. Zusatzinfos
+            docx_pfad = programm_2_word_output.main(
+                pfad_ki,
+                vorlage_pfad,
+                auswahl,
+                steuerstatus,
+                zusatzkosten_bezeichnung,
+                zusatzkosten_betrag,
+            )
 
             if docx_pfad is None or not os.path.isfile(docx_pfad):
                 raise RuntimeError("Programm 2 hat kein Schreiben erzeugt.")
@@ -302,7 +318,6 @@ if st.button("Gutachten verarbeiten"):
         with open(docx_pfad, "rb") as f:
             docx_bytes = f.read()
 
-        # Dateien löschen (PDF, KI-Text, DOCX)
         cleanup_files(pdf_path, pfad_ki, docx_pfad)
 
         st.success("Verarbeitung abgeschlossen.")
@@ -328,7 +343,11 @@ with st.expander("Debug: Dateien im System anzeigen"):
     st.write(os.listdir(KI_ANTWORT_ORDNER))
     st.subheader("Ausgang-Schreiben")
     st.write(os.listdir(AUSGANGS_ORDNER))
-    st.subheader("Debug: gewählte Vorlage")
-    st.write(os.path.basename(vorlage_pfad) if vorlage_pfad else None)
+    st.subheader("Debug: aktuelle Auswahl")
+    st.write({
+        "auswahl": auswahl,
+        "vorlage": os.path.basename(vorlage_pfad) if vorlage_pfad else None,
+        "steuerstatus": steuerstatus,
+    })
     st.subheader("Debug: registrierte User (nur Usernames)")
     st.write(sorted(list(load_users().keys())))
