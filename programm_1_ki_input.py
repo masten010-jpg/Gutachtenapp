@@ -13,7 +13,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Kommentar: Basisverzeic
 EINGANGS_ORDNER = config.EINGANGS_ORDNER  # Kommentar: Eingangspfad aus config übernehmen
 KI_ANTWORT_ORDNER = config.KI_ANTWORT_ORDNER  # Kommentar: KI-Antwortpfad aus config übernehmen
 
-GEMINI_MODEL = "gemini-2.5"  # Kommentar: Modellname festlegen
+GEMINI_MODEL = "gemini-2.5-flash"  # Kommentar: Modellname festlegen
 
 MAX_TEXT_CHARS = 1000000  # Kommentar: Maximaler Text, der an die KI gesendet wird
 KI_MAX_RETRIES = 3  # Kommentar: Anzahl Retry-Versuche bei KI-Fehlern
