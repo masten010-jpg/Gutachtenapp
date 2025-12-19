@@ -149,13 +149,17 @@ HIER IST DAS GUTACHTEN (Textauszug, nutze möglichst viele Infos daraus):
 """  # Kommentar: Prompt-Template mit Platzhaltern
 
 
-def get_gemini_client():  # Kommentar: Gemini-Client erstellen
-    api_key = os.getenv("GEMINI_API_KEY")  # Kommentar: API-Key aus Env lesen
-    if not api_key:  # Kommentar: Wenn nicht gesetzt
-        raise RuntimeError("GEMINI_API_KEY ist nicht gesetzt.")  # Kommentar: Fehler werfen
-    return genai.Client(api_key=api_key)  # Kommentar: Client zurückgeben
-
-
+def get_gemini_client():  # Kommentar: Gemini-Client erstellen (Env + Streamlit Secrets Fallback)
+    api_key = os.getenv("GEMINI_API_KEY")  # Kommentar: Zuerst API-Key aus Environment Variable lesen
+    if not api_key:  # Kommentar: Wenn Env-Variable nicht gesetzt ist
+        try:  # Kommentar: Streamlit-Secrets Fallback versuchen (für Streamlit Cloud typisch)
+            import streamlit as st  # Kommentar: Streamlit importieren
+            api_key = st.secrets.get("GEMINI_API_KEY")  # Kommentar: API-Key aus Streamlit Secrets lesen
+        except Exception:  # Kommentar: Wenn Streamlit nicht verfügbar oder Secret fehlt
+            api_key = None  # Kommentar: Explizit None setzen
+    if not api_key:  # Kommentar: Wenn immer noch kein Key vorhanden ist
+        raise RuntimeError("GEMINI_API_KEY fehlt (Env oder Streamlit Secrets).")  # Kommentar: Verständlicher Fehler
+    return genai.Client(api_key=api_key)  # Kommentar: GenAI Client mit Key zurückgeben
 def pdf_text_auslesen(pfad: str) -> str:  # Kommentar: PDF-Text auslesen
     seiten_text = []  # Kommentar: Liste für Seitentexte
     with pdfplumber.open(pfad) as pdf:  # Kommentar: PDF öffnen
