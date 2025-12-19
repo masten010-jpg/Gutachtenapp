@@ -15,9 +15,9 @@ KI_ANTWORT_ORDNER = config.KI_ANTWORT_ORDNER  # Kommentar: KI-Antwortpfad aus co
 
 GEMINI_MODEL = "gemini-2.5-flash"  # Kommentar: Modellname festlegen
 
-MAX_TEXT_CHARS = 1000000  # Kommentar: Maximaler Text, der an die KI gesendet wird
+MAX_TEXT_CHARS = 10000  # Kommentar: Maximaler Text, der an die KI gesendet wird
 KI_MAX_RETRIES = 3  # Kommentar: Anzahl Retry-Versuche bei KI-Fehlern
-MIN_TEXT_CHARS = 60000  # Kommentar: Mindestlänge, damit PDF als ausreichend gilt
+MIN_TEXT_CHARS = 6000  # Kommentar: Mindestlänge, damit PDF als ausreichend gilt
 
 
 def prompt_zusatz(auswahl: str, steuerstatus: str) -> str:  # Kommentar: Varianten-spezifischen Prompt-Zusatz erzeugen
