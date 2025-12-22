@@ -16,7 +16,7 @@ GEMINI_MODEL = "gemini-2.5-flash"  # Kommentar: Stabiler Modellname für generat
 
 MAX_TEXT_CHARS = 12000  # Kommentar: Begrenzung, damit Requests nicht zu groß werden (Streamlit Cloud stabil)
 KI_MAX_RETRIES = 3  # Kommentar: Maximaler Retry-Zähler für KI-Aufrufe
-MIN_TEXT_CHARS = 6000  # Kommentar: Mindestlänge des extrahierten Textes (sonst Abbruch)
+MIN_TEXT_CHARS = 600  # Kommentar: Mindestlänge des extrahierten Textes (sonst Abbruch)
 
 
 def prompt_zusatz(auswahl: str, steuerstatus: str) -> str:  # Kommentar: Zusätzlichen Kontext je Abrechnungsvariante erzeugen
