@@ -14,9 +14,9 @@ KI_ANTWORT_ORDNER = config.KI_ANTWORT_ORDNER  # Kommentar: KI-Antwortordner aus 
 
 GEMINI_MODEL = "gemini-2.5-flash"  # Kommentar: Stabiler Modellname für generate_content setzen
 
-MAX_TEXT_CHARS = 120000  # Kommentar: Begrenzung, damit Requests nicht zu groß werden (Streamlit Cloud stabil)
+MAX_TEXT_CHARS = 12000  # Kommentar: Begrenzung, damit Requests nicht zu groß werden (Streamlit Cloud stabil)
 KI_MAX_RETRIES = 3  # Kommentar: Maximaler Retry-Zähler für KI-Aufrufe
-MIN_TEXT_CHARS = 60000  # Kommentar: Mindestlänge des extrahierten Textes (sonst Abbruch)
+MIN_TEXT_CHARS = 6000  # Kommentar: Mindestlänge des extrahierten Textes (sonst Abbruch)
 
 
 def prompt_zusatz(auswahl: str, steuerstatus: str) -> str:  # Kommentar: Zusätzlichen Kontext je Abrechnungsvariante erzeugen
