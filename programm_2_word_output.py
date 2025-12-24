@@ -1,203 +1,183 @@
-# programm_2_word_output.py  # Kommentar: KI-JSON aus TXT lesen, Daten nachbearbeiten, DOCX erstellen
+# programm_2_word_output.py  # Kommentar: KI JSON -> Nachbearbeitung -> Word erzeugen
 
-import os  # Kommentar: Pfade und Dateisystem
-import json  # Kommentar: JSON parsen
-import re  # Kommentar: Textbereinigung / Zahlenfilter
-from datetime import datetime, timedelta  # Kommentar: Frist/Heutdatum
-from docxtpl import DocxTemplate  # Kommentar: DOCX Templates rendern
-from programm_1_ki_input import KI_ANTWORT_ORDNER, BASE_DIR  # Kommentar: Ordner/BASE_DIR übernehmen
+import os  # Kommentar: Pfade/Dateien
+import json  # Kommentar: JSON parsing
+from datetime import datetime, timedelta  # Kommentar: Datum/Fristen
+from docxtpl import DocxTemplate  # Kommentar: DOCX Rendering
+from programm_1_ki_input import KI_ANTWORT_ORDNER, BASE_DIR  # Kommentar: Ordnerpfade
 
-AUSGANGS_ORDNER = os.path.join(BASE_DIR, "ausgang_schreiben")  # Kommentar: Ausgangsordner für DOCX
-JSON_START_MARKER = "JSON_START"  # Kommentar: Startmarker im KI-Text
-JSON_END_MARKER = "JSON_END"  # Kommentar: Endmarker im KI-Text
+AUSGANGS_ORDNER = os.path.join(BASE_DIR, "ausgang_schreiben")  # Kommentar: Output Ordner
+JSON_START_MARKER = "JSON_START"  # Kommentar: JSON Start Marker
+JSON_END_MARKER = "JSON_END"  # Kommentar: JSON End Marker
 
-def json_aus_ki_antwort_parsen(ki_text: str) -> dict:  # Kommentar: JSON zwischen Markern extrahieren
+def json_aus_ki_antwort_parsen(ki_text: str) -> dict:  # Kommentar: JSON aus KI-Text extrahieren
     start_idx = ki_text.find(JSON_START_MARKER)  # Kommentar: Start suchen
     end_idx = ki_text.find(JSON_END_MARKER)  # Kommentar: Ende suchen
-    if start_idx == -1 or end_idx == -1:  # Kommentar: Marker fehlen?
-        raise ValueError("JSON_START oder JSON_END nicht gefunden.")  # Kommentar: Fehler werfen
-    json_roh = ki_text[start_idx + len(JSON_START_MARKER):end_idx].strip()  # Kommentar: Block ausschneiden
-    json_roh = json_roh.replace("```json", "").replace("```", "").strip()  # Kommentar: Falls KI Code-Fences setzt
+    if start_idx == -1 or end_idx == -1:  # Kommentar: Marker fehlt
+        raise ValueError("JSON_START oder JSON_END nicht gefunden.")  # Kommentar: Fehler
+    json_roh = ki_text[start_idx + len(JSON_START_MARKER):end_idx].strip()  # Kommentar: Bereich ausschneiden
+    json_roh = json_roh.replace("```json", "").replace("```", "").strip()  # Kommentar: Codefences entfernen
     first_brace = json_roh.find("{")  # Kommentar: Erste Klammer
     last_brace = json_roh.rfind("}")  # Kommentar: Letzte Klammer
-    if first_brace == -1 or last_brace == -1 or first_brace >= last_brace:  # Kommentar: Ungültig?
+    if first_brace == -1 or last_brace == -1 or first_brace >= last_brace:  # Kommentar: Ungültig
         raise ValueError("Kein gültiger JSON-Block in KI-Antwort.")  # Kommentar: Fehler
-    json_clean = json_roh[first_brace:last_brace + 1]  # Kommentar: JSON isolieren
-    json_clean = json_clean.replace(",\n}", "\n}").replace(",}", "}")  # Kommentar: Häufiger KI-Fehler: trailing comma
-    return json.loads(json_clean)  # Kommentar: JSON parsen
+    json_clean = json_roh[first_brace:last_brace + 1]  # Kommentar: JSON sauber ausschneiden
+    json_clean = json_clean.replace(",\n}", "\n}").replace(",}", "}")  # Kommentar: Häufige KI-Kommafehler glätten
+    return json.loads(json_clean)  # Kommentar: JSON parsen und zurückgeben
 
-def euro_zu_float(text) -> float:  # Kommentar: Euro-Text -> Float (robust)
-    if isinstance(text, (int, float)):  # Kommentar: Wenn schon Zahl
-        return float(text)  # Kommentar: Float zurück
-    if not text:  # Kommentar: Leer?
+def euro_zu_float(text) -> float:  # Kommentar: Euro-String -> float robust
+    if isinstance(text, (int, float)):  # Kommentar: Schon Zahl
+        return float(text)  # Kommentar: Cast
+    if not text:  # Kommentar: Leer
         return 0.0  # Kommentar: Null
-    t = str(text)  # Kommentar: Zu String
+    t = str(text)  # Kommentar: String
     t = t.replace("€", "").replace("EUR", "").replace("Euro", "")  # Kommentar: Währung entfernen
     t = t.replace("\u00a0", " ").strip()  # Kommentar: NBSP entfernen
     t = t.replace(" ", "")  # Kommentar: Spaces entfernen
-    filtered = []  # Kommentar: Nur Zahlzeichen sammeln
-    for ch in t:  # Kommentar: Zeichen durchlaufen
-        if ch.isdigit() or ch in [",", ".", "+", "-"]:  # Kommentar: Erlaubte Zeichen
-            filtered.append(ch)  # Kommentar: Sammeln
-    t = "".join(filtered)  # Kommentar: Zusammenbauen
-    if not t:  # Kommentar: Wenn nichts übrig
+    allowed = []  # Kommentar: Erlaubte Zeichen sammeln
+    for ch in t:  # Kommentar: Iteration
+        if ch.isdigit() or ch in [",", ".", "+", "-"]:  # Kommentar: erlaubte Zeichen
+            allowed.append(ch)  # Kommentar: hinzufügen
+    t = "".join(allowed)  # Kommentar: zusammensetzen
+    if not t:  # Kommentar: leer
         return 0.0  # Kommentar: Null
-    if "." in t and "," in t:  # Kommentar: Tausenderpunkt + Dezimalkomma
-        t = t.replace(".", "").replace(",", ".")  # Kommentar: In Float-Format
-    elif "," in t:  # Kommentar: Nur Komma
-        t = t.replace(",", ".")  # Kommentar: In Float-Format
+    if "." in t and "," in t:  # Kommentar: Format 1.234,56
+        t = t.replace(".", "").replace(",", ".")  # Kommentar: Tausenderpunkte raus, Komma -> Punkt
+    elif "," in t:  # Kommentar: Format 1234,56
+        t = t.replace(",", ".")  # Kommentar: Komma -> Punkt
     try:  # Kommentar: Parse versuchen
-        return float(t)  # Kommentar: Float
-    except ValueError:  # Kommentar: Parse fehlgeschlagen
-        return 0.0  # Kommentar: Null
+        return float(t)  # Kommentar: Return float
+    except ValueError:  # Kommentar: Fehler
+        return 0.0  # Kommentar: Fallback
 
-def float_zu_euro(betrag: float) -> str:  # Kommentar: Float -> "1.234,56 €"
-    s = f"{betrag:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")  # Kommentar: Format DE
-    return s + " €"  # Kommentar: Eurozeichen anfügen
+def float_zu_euro(betrag: float) -> str:  # Kommentar: float -> deutsches Euroformat
+    s = f"{betrag:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")  # Kommentar: Format
+    return s + " €"  # Kommentar: Eurozeichen
 
-def extrahiere_platzhalter(vorlage_pfad: str):  # Kommentar: Platzhalter aus DOCX lesen
-    doc = DocxTemplate(vorlage_pfad)  # Kommentar: Vorlage laden
-    return doc.get_undeclared_template_variables()  # Kommentar: Variablen zurückgeben
-
-def daten_defaults(daten: dict) -> dict:  # Kommentar: Standardkeys setzen
-    keys = [  # Kommentar: Alle erwarteten Keys (inkl. deiner neuen)
+def daten_defaults(daten: dict) -> dict:  # Kommentar: Defaults für erwartete Keys
+    keys = [  # Kommentar: Liste aller wichtigen Keys
         "MANDANT_VORNAME", "MANDANT_NACHNAME", "MANDANT_NAME",  # Kommentar: Mandant
         "MANDANT_STRASSE", "MANDANT_PLZ_ORT",  # Kommentar: Adresse
         "UNFALL_DATUM", "UNFALL_UHRZEIT", "UNFALLORT", "UNFALL_STRASSE",  # Kommentar: Unfall
         "FAHRZEUGTYP", "KENNZEICHEN", "FAHRZEUG_KENNZEICHEN",  # Kommentar: Fahrzeug
-        "POLIZEIAKTE_NUMMER", "SCHADENSNUMMER", "AKTENZEICHEN",  # Kommentar: Nummern
-        "SCHADENHERGANG",  # Kommentar: Hergang
+        "POLIZEIAKTE_NUMMER", "SCHADENSNUMMER", "AKTENZEICHEN",  # Kommentar: Akten
+        "SCHADENHERGANG",  # Kommentar: Text
         "REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN",  # Kommentar: Kosten
-        "NUTZUNGSAUSFALL", "MWST_BETRAG",  # Kommentar: Nutzung + MwSt
-        "WIEDERBESCHAFFUNGSWERT", "RESTWERT",  # Kommentar: WBW/Rest
-        "FRIST_DATUM", "HEUTDATUM",  # Kommentar: Frist/Heute
-        "ABRECHNUNGSART", "STEUERSTATUS",  # Kommentar: Meta
-        "VORSTEUERBERECHTIGUNG",  # Kommentar: Textvariable für Word (genau wie du es willst)
+        "NUTZUNGSAUSFALL", "MWST_BETRAG",  # Kommentar: Nutzung/MwSt
+        "WIEDERBESCHAFFUNGSWERT", "RESTWERT",  # Kommentar: Totalschaden
+        "FRIST_DATUM", "HEUTDATUM",  # Kommentar: System
+        "ABRECHNUNGSART", "STEUERSTATUS",  # Kommentar: Auswahl
+        "VORSTEUERBERECHTIGUNG",  # Kommentar: Textvariable für Word
         "ZUSATZKOSTEN_BEZEICHNUNG", "ZUSATZKOSTEN_BETRAG",  # Kommentar: Optional
+        "WIEDERBESCHAFFUNGSAUFWAND",  # Kommentar: WBW - Restwert
         "KOSTENSUMME_X", "GESAMTSUMME",  # Kommentar: Summen
-    ]  # Kommentar: Ende Keys
-    for k in keys:  # Kommentar: Keys durchlaufen
-        daten.setdefault(k, "")  # Kommentar: Default leer
-    return daten  # Kommentar: Zurück
+    ]  # Kommentar: Ende keys
+    for k in keys:  # Kommentar: Iteration
+        daten.setdefault(k, "")  # Kommentar: Default setzen
+    return daten  # Kommentar: Return
 
-def anwenden_mwst_anzeige_logik(daten: dict, auswahl: str, steuerstatus: str) -> dict:  # Kommentar: MWST_BETRAG anzeigen/leer
-    norm = (auswahl or "").lower()  # Kommentar: Variante normalisieren
-    is_fiktiv = "fiktive abrechnung" in norm or "totalschaden fiktiv" in norm  # Kommentar: Fiktive Varianten erkennen
-    vorsteuer = (steuerstatus == "vorsteuerabzugsberechtigt")  # Kommentar: Boolean für Vorsteuer
+def setze_vorsteuer_text(daten: dict, steuerstatus: str) -> dict:  # Kommentar: VORSTEUERBERECHTIGUNG als Text setzen
+    daten["STEUERSTATUS"] = steuerstatus  # Kommentar: speichern
+    if steuerstatus == "vorsteuerabzugsberechtigt":  # Kommentar: Vorsteuer-Fall
+        daten["VORSTEUERBERECHTIGUNG"] = "vorsteuerberechtigt"  # Kommentar: gewünschter Text
+    else:  # Kommentar: Nicht-Vorsteuer-Fall
+        daten["VORSTEUERBERECHTIGUNG"] = "nicht vorsteuerberechtigt"  # Kommentar: gewünschter Text
+    return daten  # Kommentar: Return
 
-    # Kommentar: Wenn vorsteuerabzugsberechtigt ODER fiktiv -> MwSt nicht fordern/anzeigen
-    if vorsteuer or is_fiktiv:  # Kommentar: Bedingung
-        daten["MWST_BETRAG"] = ""  # Kommentar: Leer lassen (damit Word-Zeile leer bleibt)
-        return daten  # Kommentar: Fertig
+def mwst_leeren_wenn_noetig(daten: dict, auswahl: str, steuerstatus: str) -> dict:  # Kommentar: MWST_BETRAG leeren wenn irrelevant
+    norm = (auswahl or "").lower()  # Kommentar: normalize
+    is_fiktiv = "fiktive abrechnung" in norm  # Kommentar: fiktiv?
+    if is_fiktiv:  # Kommentar: fiktiv => keine MwSt
+        daten["MWST_BETRAG"] = ""  # Kommentar: leer
+        return daten  # Kommentar: Return
+    if steuerstatus == "vorsteuerabzugsberechtigt":  # Kommentar: Vorsteuer => MwSt nicht fordern
+        daten["MWST_BETRAG"] = ""  # Kommentar: leer
+        return daten  # Kommentar: Return
+    return daten  # Kommentar: sonst unverändert
 
-    # Kommentar: Ansonsten MwSt anzeigen, wenn Wert vorhanden (und sauber formatieren)
-    mwst_val = euro_zu_float(daten.get("MWST_BETRAG", ""))  # Kommentar: MwSt als Zahl
-    if mwst_val > 0:  # Kommentar: Wenn vorhanden
-        daten["MWST_BETRAG"] = float_zu_euro(mwst_val)  # Kommentar: Formatieren
-    else:  # Kommentar: Wenn nicht vorhanden
-        daten["MWST_BETRAG"] = daten.get("MWST_BETRAG", "") or ""  # Kommentar: Leer/Fallback
-    return daten  # Kommentar: Zurück
+def berechne_summen(daten: dict, auswahl: str) -> dict:  # Kommentar: Summen bilden und Geld formatieren
+    norm = (auswahl or "").lower()  # Kommentar: normalize
+    is_totalschaden = "totalschaden" in norm  # Kommentar: totalschaden?
+    reparatur = euro_zu_float(daten.get("REPARATURKOSTEN", ""))  # Kommentar: reparatur
+    wertminderung = euro_zu_float(daten.get("WERTMINDERUNG", ""))  # Kommentar: wertminderung
+    kostenpausch = euro_zu_float(daten.get("KOSTENPAUSCHALE", ""))  # Kommentar: kostenpausch
+    gutachter = euro_zu_float(daten.get("GUTACHTERKOSTEN", ""))  # Kommentar: gutachter
+    nutzung = euro_zu_float(daten.get("NUTZUNGSAUSFALL", ""))  # Kommentar: nutzungsausfall (wenn Betrag)
+    mwst = euro_zu_float(daten.get("MWST_BETRAG", ""))  # Kommentar: mwst
+    zusatz = euro_zu_float(daten.get("ZUSATZKOSTEN_BETRAG", ""))  # Kommentar: zusatzkosten
+    wbw = euro_zu_float(daten.get("WIEDERBESCHAFFUNGSWERT", ""))  # Kommentar: wbw
+    restwert = euro_zu_float(daten.get("RESTWERT", ""))  # Kommentar: restwert
 
-def summen_berechnen(daten: dict) -> dict:  # Kommentar: Summen aus Kostenfeldern berechnen
-    reparatur = euro_zu_float(daten.get("REPARATURKOSTEN", ""))  # Kommentar: Reparatur
-    wertminderung = euro_zu_float(daten.get("WERTMINDERUNG", ""))  # Kommentar: Wertminderung
-    kostenpausch = euro_zu_float(daten.get("KOSTENPAUSCHALE", ""))  # Kommentar: Pauschale
-    gutachter = euro_zu_float(daten.get("GUTACHTERKOSTEN", ""))  # Kommentar: Gutachter
-    zusatz = euro_zu_float(daten.get("ZUSATZKOSTEN_BETRAG", ""))  # Kommentar: Zusatzkosten
-    nutzung = euro_zu_float(daten.get("NUTZUNGSAUSFALL", ""))  # Kommentar: Nutzung
+    if is_totalschaden:  # Kommentar: Totalschaden-Logik
+        wba = max(wbw - restwert, 0.0)  # Kommentar: WBW - Restwert
+        daten["WIEDERBESCHAFFUNGSAUFWAND"] = float_zu_euro(wba) if wba > 0 else ""  # Kommentar: format
+        daten["REPARATURKOSTEN"] = ""  # Kommentar: Reparaturkosten leer im Totalschaden (wie üblich)
+        reparatur = 0.0  # Kommentar: Für Summen nullen
 
-    # Kommentar: KOSTENSUMME_X wie in deinem Schema: Reparatur + Wertminderung + Kostenpauschale + Gutachter
-    kosten_x = reparatur + wertminderung + kostenpausch + gutachter  # Kommentar: Summe X
-    daten["KOSTENSUMME_X"] = float_zu_euro(kosten_x) if kosten_x > 0 else ""  # Kommentar: Formatieren oder leer
+    kosten_x = reparatur + wertminderung + kostenpausch + gutachter  # Kommentar: KOSTENSUMME_X
+    gesamt = kosten_x + nutzung + zusatz + mwst  # Kommentar: Gesamtsumme inkl MwSt (wenn vorhanden)
 
-    # Kommentar: GESAMTSUMME: Summe X + Nutzung + Zusatzkosten (MwSt wird separat dargestellt über MWST_BETRAG)
-    gesamt = kosten_x + nutzung + zusatz  # Kommentar: Gesamt
-    daten["GESAMTSUMME"] = float_zu_euro(gesamt) if gesamt > 0 else ""  # Kommentar: Formatieren oder leer
+    daten["REPARATURKOSTEN"] = float_zu_euro(reparatur) if reparatur > 0 else daten.get("REPARATURKOSTEN", "")  # Kommentar: format
+    daten["WERTMINDERUNG"] = float_zu_euro(wertminderung) if wertminderung > 0 else daten.get("WERTMINDERUNG", "")  # Kommentar: format
+    daten["KOSTENPAUSCHALE"] = float_zu_euro(kostenpausch) if kostenpausch > 0 else daten.get("KOSTENPAUSCHALE", "")  # Kommentar: format
+    daten["GUTACHTERKOSTEN"] = float_zu_euro(gutachter) if gutachter > 0 else daten.get("GUTACHTERKOSTEN", "")  # Kommentar: format
+    daten["NUTZUNGSAUSFALL"] = float_zu_euro(nutzung) if nutzung > 0 else daten.get("NUTZUNGSAUSFALL", "")  # Kommentar: format
+    daten["MWST_BETRAG"] = float_zu_euro(mwst) if mwst > 0 else daten.get("MWST_BETRAG", "")  # Kommentar: format/leer lassen
+    daten["ZUSATZKOSTEN_BETRAG"] = float_zu_euro(zusatz) if zusatz > 0 else daten.get("ZUSATZKOSTEN_BETRAG", "")  # Kommentar: format
+    daten["KOSTENSUMME_X"] = float_zu_euro(kosten_x) if kosten_x > 0 else ""  # Kommentar: format
+    daten["GESAMTSUMME"] = float_zu_euro(gesamt) if gesamt > 0 else ""  # Kommentar: format
 
-    return daten  # Kommentar: Zurück
+    return daten  # Kommentar: Return
 
-def daten_nachbearbeiten(daten: dict, vorlage_pfad: str, auswahl: str, steuerstatus: str, zus_bez: str, zus_betrag: str) -> dict:  # Kommentar: Alle Anpassungen zentral
-    daten = daten_defaults(daten)  # Kommentar: Defaults setzen
+def daten_nachbearbeiten(daten: dict, auswahl: str, steuerstatus: str, zus_bez: str, zus_betrag: str) -> dict:  # Kommentar: zentrale Nachbearbeitung
+    daten = daten_defaults(daten)  # Kommentar: defaults
+    daten["ABRECHNUNGSART"] = auswahl  # Kommentar: speichern
+    daten["ZUSATZKOSTEN_BEZEICHNUNG"] = (zus_bez or "").strip()  # Kommentar: speichern
+    daten["ZUSATZKOSTEN_BETRAG"] = (zus_betrag or "").strip()  # Kommentar: speichern
+    jetzt = datetime.now()  # Kommentar: now
+    daten["HEUTDATUM"] = jetzt.strftime("%d.%m.%Y")  # Kommentar: setzen
+    daten["FRIST_DATUM"] = (jetzt + timedelta(days=14)).strftime("%d.%m.%Y")  # Kommentar: setzen
+    daten = setze_vorsteuer_text(daten, steuerstatus)  # Kommentar: Textvariable setzen
+    daten = mwst_leeren_wenn_noetig(daten, auswahl, steuerstatus)  # Kommentar: MWST ggf leeren
+    daten = berechne_summen(daten, auswahl)  # Kommentar: Summen/Format
+    return daten  # Kommentar: Return
 
-    daten["ABRECHNUNGSART"] = auswahl  # Kommentar: Variante speichern
-    daten["STEUERSTATUS"] = steuerstatus  # Kommentar: Steuerstatus speichern
-
-    # Kommentar: Genau wie du es willst: Textvariable für Word setzen (kein Bool, kein True/False)
-    daten["VORSTEUERBERECHTIGUNG"] = "vorsteuerabzugsberechtigt" if steuerstatus == "vorsteuerabzugsberechtigt" else "nicht vorsteuerabzugsberechtigt"  # Kommentar: Textwert setzen
-
-    daten["ZUSATZKOSTEN_BEZEICHNUNG"] = (zus_bez or "").strip()  # Kommentar: Zusatzkosten-Bezeichnung
-    daten["ZUSATZKOSTEN_BETRAG"] = (zus_betrag or "").strip()  # Kommentar: Zusatzkosten-Betrag roh
-
-    # Kommentar: Geldfelder sauber formatieren (ohne MwSt-Entscheidung)
-    for feld in ["REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN", "NUTZUNGSAUSFALL"]:  # Kommentar: Felderliste
-        val = euro_zu_float(daten.get(feld, ""))  # Kommentar: In Float
-        daten[feld] = float_zu_euro(val) if val > 0 else (daten.get(feld, "") or "")  # Kommentar: Format oder leer
-
-    # Kommentar: Zusatzkosten-Betrag formatieren
-    zus_val = euro_zu_float(daten.get("ZUSATZKOSTEN_BETRAG", ""))  # Kommentar: Zusatzkosten Zahl
-    daten["ZUSATZKOSTEN_BETRAG"] = float_zu_euro(zus_val) if zus_val > 0 else ""  # Kommentar: Format oder leer
-
-    # Kommentar: FRIST/HEUTE setzen
-    jetzt = datetime.now()  # Kommentar: Jetzt
-    daten["FRIST_DATUM"] = (jetzt + timedelta(days=14)).strftime("%d.%m.%Y")  # Kommentar: +14 Tage
-    daten["HEUTDATUM"] = jetzt.strftime("%d.%m.%Y")  # Kommentar: Heute
-
-    # Kommentar: MwSt-Zeile: anzeigen oder leer lassen (genau nach deiner Auswahl)
-    daten = anwenden_mwst_anzeige_logik(daten, auswahl, steuerstatus)  # Kommentar: MwSt setzen/leer
-
-    # Kommentar: Summen berechnen (unabhängig davon, ob MwSt angezeigt wird)
-    daten = summen_berechnen(daten)  # Kommentar: Summen setzen
-
-    # Kommentar: Optional: Platzhalterliste für Debug (kannst du bei Bedarf ausgeben)
-    _ = extrahiere_platzhalter(vorlage_pfad)  # Kommentar: Platzhalter lesen (nicht zwingend, aber hilft später)
-
-    return daten  # Kommentar: Fertige Daten zurück
-
-def word_aus_vorlage_erstellen(daten: dict, vorlage_pfad: str, ziel_pfad: str) -> None:  # Kommentar: DOCX generieren
+def word_aus_vorlage_erstellen(daten: dict, vorlage_pfad: str, ziel_pfad: str) -> None:  # Kommentar: DOCX erzeugen
     doc = DocxTemplate(vorlage_pfad)  # Kommentar: Vorlage laden
-    os.makedirs(os.path.dirname(ziel_pfad), exist_ok=True)  # Kommentar: Zielordner sicherstellen
-    doc.render(daten)  # Kommentar: Wichtig: Render ALLES, damit auch Steuerstatus/Ifs funktionieren
-    doc.save(ziel_pfad)  # Kommentar: Speichern
+    os.makedirs(os.path.dirname(ziel_pfad), exist_ok=True)  # Kommentar: Zielordner sicher
+    doc.render(daten)  # Kommentar: Render (alle Variablen, kein Filter)
+    doc.save(ziel_pfad)  # Kommentar: speichern
 
-def ki_datei_verarbeiten(pfad_ki_txt: str, vorlage_pfad: str, auswahl: str, steuerstatus: str, zus_bez: str, zus_betrag: str) -> str:  # Kommentar: KI TXT -> DOCX
-    with open(pfad_ki_txt, "r", encoding="utf-8") as f:  # Kommentar: KI-Datei lesen
-        ki_text = f.read()  # Kommentar: Text holen
-    daten = json_aus_ki_antwort_parsen(ki_text)  # Kommentar: JSON parsen
-    daten = daten_nachbearbeiten(daten, vorlage_pfad, auswahl, steuerstatus, zus_bez, zus_betrag)  # Kommentar: Daten finalisieren
-    basisname = os.path.splitext(os.path.basename(pfad_ki_txt))[0]  # Kommentar: Basisname
-    datum_str = datetime.now().strftime("%Y%m%d_%H%M%S")  # Kommentar: Timestamp
-    ausgabe_name = f"{basisname}_schreiben_{datum_str}.docx"  # Kommentar: Ausgabe-Dateiname
-    ausgabe_pfad = os.path.join(AUSGANGS_ORDNER, ausgabe_name)  # Kommentar: Ausgabe-Pfad
-    word_aus_vorlage_erstellen(daten, vorlage_pfad, ausgabe_pfad)  # Kommentar: DOCX erzeugen
-    return ausgabe_pfad  # Kommentar: Pfad zurück
+def generate_from_data(daten: dict, vorlage_pfad: str, auswahl: str, steuerstatus: str, zus_bez: str = "", zus_betrag: str = "") -> str:  # Kommentar: DOCX direkt aus Daten erzeugen
+    os.makedirs(AUSGANGS_ORDNER, exist_ok=True)  # Kommentar: ordner sicherstellen
+    daten = daten_nachbearbeiten(daten, auswahl, steuerstatus, zus_bez, zus_betrag)  # Kommentar: nachbearbeiten
+    datum_str = datetime.now().strftime("%Y%m%d_%H%M%S")  # Kommentar: timestamp
+    ausgabe_name = f"korrigiert_schreiben_{datum_str}.docx"  # Kommentar: name
+    ausgabe_pfad = os.path.join(AUSGANGS_ORDNER, ausgabe_name)  # Kommentar: pfad
+    word_aus_vorlage_erstellen(daten, vorlage_pfad, ausgabe_pfad)  # Kommentar: erstellen
+    return ausgabe_pfad  # Kommentar: return
 
-def main(  # Kommentar: Entry-Point für App
-    pfad_ki_txt: str = None,  # Kommentar: Optional: KI-Datei, sonst neueste
-    vorlage_pfad: str | None = None,  # Kommentar: Muss gesetzt sein (Word-Vorlage)
-    auswahl: str = "",  # Kommentar: Variante
-    steuerstatus: str = "",  # Kommentar: Steuerstatus
-    zus_bez: str = "",  # Kommentar: Zusatzkosten-Bezeichnung
-    zus_betrag: str = ""  # Kommentar: Zusatzkosten-Betrag
-) -> str:  # Kommentar: Gibt DOCX-Pfad zurück
-    os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)  # Kommentar: Ordner sicher
-    os.makedirs(AUSGANGS_ORDNER, exist_ok=True)  # Kommentar: Ordner sicher
+def ki_datei_verarbeiten(pfad_ki_txt: str, vorlage_pfad: str, auswahl: str, steuerstatus: str, zus_bez: str, zus_betrag: str) -> str:  # Kommentar: KI-Datei -> DOCX
+    with open(pfad_ki_txt, "r", encoding="utf-8") as f:  # Kommentar: open
+        ki_text = f.read()  # Kommentar: read
+    daten = json_aus_ki_antwort_parsen(ki_text)  # Kommentar: parse
+    return generate_from_data(daten, vorlage_pfad, auswahl, steuerstatus, zus_bez, zus_betrag)  # Kommentar: weiter
 
-    if vorlage_pfad is None:  # Kommentar: Vorlage muss übergeben werden
-        raise ValueError("vorlage_pfad muss übergeben werden (Word-Vorlage .docx).")  # Kommentar: Fehler
+def main(pfad_ki_txt: str = None, vorlage_pfad: str | None = None, auswahl: str = "", steuerstatus: str = "", zus_bez: str = "", zus_betrag: str = "") -> str:  # Kommentar: Kompatibler Main
+    os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)  # Kommentar: ordner
+    os.makedirs(AUSGANGS_ORDNER, exist_ok=True)  # Kommentar: ordner
+    if vorlage_pfad is None:  # Kommentar: vorlage fehlt
+        raise ValueError("vorlage_pfad muss übergeben werden (Word-Vorlage .docx).")  # Kommentar: error
+    if pfad_ki_txt is None:  # Kommentar: keine KI-Datei angegeben
+        dateien = [os.path.join(KI_ANTWORT_ORDNER, f) for f in os.listdir(KI_ANTWORT_ORDNER) if f.endswith("_ki.txt")]  # Kommentar: liste
+        if not dateien:  # Kommentar: none
+            raise FileNotFoundError("Keine KI-Datei gefunden.")  # Kommentar: error
+        pfad_ki_txt = max(dateien, key=os.path.getmtime)  # Kommentar: neueste
+    if not os.path.isfile(pfad_ki_txt):  # Kommentar: exists?
+        raise FileNotFoundError(f"KI-Datei existiert nicht: {pfad_ki_txt}")  # Kommentar: error
+    if not os.path.isfile(vorlage_pfad):  # Kommentar: exists?
+        raise FileNotFoundError(f"Vorlage existiert nicht: {vorlage_pfad}")  # Kommentar: error
+    return ki_datei_verarbeiten(pfad_ki_txt, vorlage_pfad, auswahl, steuerstatus, zus_bez, zus_betrag)  # Kommentar: run
 
-    if pfad_ki_txt is None:  # Kommentar: Wenn keine KI-Datei angegeben
-        dateien = [os.path.join(KI_ANTWORT_ORDNER, f) for f in os.listdir(KI_ANTWORT_ORDNER) if f.endswith("_ki.txt")]  # Kommentar: Kandidaten suchen
-        if not dateien:  # Kommentar: Keine gefunden?
-            raise FileNotFoundError("Keine KI-Datei gefunden.")  # Kommentar: Fehler
-        pfad_ki_txt = max(dateien, key=os.path.getmtime)  # Kommentar: Neueste nehmen
-
-    if not os.path.isfile(pfad_ki_txt):  # Kommentar: Existiert KI-Datei?
-        raise FileNotFoundError(f"KI-Datei existiert nicht: {pfad_ki_txt}")  # Kommentar: Fehler
-
-    if not os.path.isfile(vorlage_pfad):  # Kommentar: Existiert Vorlage?
-        raise FileNotFoundError(f"Vorlage existiert nicht: {vorlage_pfad}")  # Kommentar: Fehler
-
-    return ki_datei_verarbeiten(pfad_ki_txt, vorlage_pfad, auswahl, steuerstatus, zus_bez, zus_betrag)  # Kommentar: Verarbeiten und DOCX-Pfad liefern
-
-if __name__ == "__main__":  # Kommentar: Direktlauf
-    main()  # Kommentar: Start
+if __name__ == "__main__":  # Kommentar: direct run
+    main()  # Kommentar: run
