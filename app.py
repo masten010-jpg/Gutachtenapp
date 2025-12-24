@@ -1,92 +1,109 @@
-# app.py  # Kommentar: Haupt-Streamlit-App (Login + Upload + Verarbeitung + Download)
+# app.py  # Kommentar: Streamlit App (Upload -> KI Analyse -> Korrektur -> Word erzeugen)
 
-import os  # Kommentar: Pfade und Dateisystem
-import json  # Kommentar: User-Daten (Hashes) als JSON speichern
-import time  # Kommentar: Login-Rate-Limit / Blockzeit
-import hmac  # Kommentar: Zeitkonstanter Hash-Vergleich
-import hashlib  # Kommentar: Passwort-Hashing (PBKDF2)
-import secrets  # Kommentar: Sichere Zufalls-Salts
-from datetime import datetime  # Kommentar: Timestamp für Dateinamen
-import streamlit as st  # Kommentar: UI
-from docxtpl import DocxTemplate  # Kommentar: Word-Template Variablen lesen (Debug / optional)
+import os  # Kommentar: Für Dateipfade und Ordner
+import json  # Kommentar: Für Users.json Speicherung
+import time  # Kommentar: Für einfache Bremse / Timing
+import hashlib  # Kommentar: Für PBKDF2 Passwort-Hashing (ohne externe Library)
+import hmac  # Kommentar: Für konstanten Zeitvergleich beim Login
+import secrets  # Kommentar: Für kryptografisch sicheren Salt
+from datetime import datetime  # Kommentar: Für Zeitstempel bei Dateinamen
+import streamlit as st  # Kommentar: Streamlit UI
+from docxtpl import DocxTemplate  # Kommentar: Für Platzhalter-Analyse (optional)
 
-import config  # Kommentar: Deine Pfad-Konfig
-import programm_1_ki_input  # Kommentar: Programm 1 (PDF->KI->TXT)
-import programm_2_word_output  # Kommentar: Programm 2 (KI-TXT->DOCX)
+import config  # Kommentar: Konfigurationsdatei (Ordnerpfade / Vorlagenordner)
+import programm_1_ki_input  # Kommentar: Programm 1: PDF -> KI -> _ki.txt
+import programm_2_word_output  # Kommentar: Programm 2: JSON -> DOCX
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Kommentar: Basisverzeichnis des Projekts
-EINGANGS_ORDNER = config.EINGANGS_ORDNER  # Kommentar: Ordner für hochgeladene PDFs
-KI_ANTWORT_ORDNER = config.KI_ANTWORT_ORDNER  # Kommentar: Ordner für KI-Antworten
-AUSGANGS_ORDNER = os.path.join(BASE_DIR, "ausgang_schreiben")  # Kommentar: Ordner für fertige DOCX
+EINGANGS_ORDNER = config.EINGANGS_ORDNER  # Kommentar: PDF Eingang
+KI_ANTWORT_ORDNER = config.KI_ANTWORT_ORDNER  # Kommentar: KI Antworten Ordner
+AUSGANGS_ORDNER = os.path.join(BASE_DIR, "ausgang_schreiben")  # Kommentar: DOCX Ausgabe Ordner
 
-os.makedirs(EINGANGS_ORDNER, exist_ok=True)  # Kommentar: Ordner sicher anlegen
-os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)  # Kommentar: Ordner sicher anlegen
-os.makedirs(AUSGANGS_ORDNER, exist_ok=True)  # Kommentar: Ordner sicher anlegen
+os.makedirs(EINGANGS_ORDNER, exist_ok=True)  # Kommentar: Ordner anlegen, falls nicht vorhanden
+os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)  # Kommentar: Ordner anlegen, falls nicht vorhanden
+os.makedirs(AUSGANGS_ORDNER, exist_ok=True)  # Kommentar: Ordner anlegen, falls nicht vorhanden
 
-st.set_page_config(page_title="Kfz-Gutachten → Anwaltsschreiben", layout="centered")  # Kommentar: Streamlit Layout
+st.set_page_config(page_title="Kfz-Gutachten → Anwaltsschreiben", layout="centered")  # Kommentar: Streamlit Setup
 
-USERS_FILE = os.path.join(BASE_DIR, "users.json")  # Kommentar: Persistenter User-Speicher (nur Hashes, keine Klartext-PWs)
+USERS_FILE = os.path.join(BASE_DIR, "users.json")  # Kommentar: User-Speicherdatei (Hash + Salt)
+PBKDF2_ITERATIONS = 200_000  # Kommentar: PBKDF2 Iterationen (MVP-sicher)
+PBKDF2_ALGO = "sha256"  # Kommentar: PBKDF2 Hash Algorithmus
+SALT_BYTES = 16  # Kommentar: Salt Länge
 
-def _atomic_write_json(path: str, data: dict) -> None:  # Kommentar: JSON atomar schreiben (keine kaputten Dateien)
-    tmp = path + ".tmp"  # Kommentar: Temporärer Dateiname
+def _atomic_write_json(path: str, data: dict) -> None:  # Kommentar: JSON atomar speichern (verhindert kaputte Datei)
+    tmp = path + ".tmp"  # Kommentar: Temp-Datei
     with open(tmp, "w", encoding="utf-8") as f:  # Kommentar: Temp-Datei öffnen
-        json.dump(data, f, ensure_ascii=False, indent=2)  # Kommentar: JSON formatiert schreiben
-    os.replace(tmp, path)  # Kommentar: Atomar ersetzen
+        json.dump(data, f, ensure_ascii=False, indent=2)  # Kommentar: JSON schreiben
+    os.replace(tmp, path)  # Kommentar: Temp-Datei atomar ersetzen
 
-def load_users() -> dict:  # Kommentar: Nutzer-Hashes laden
+def load_users() -> dict:  # Kommentar: Users.json laden
     if not os.path.isfile(USERS_FILE):  # Kommentar: Wenn Datei nicht existiert
-        return {}  # Kommentar: Leeres Dict zurück
-    try:  # Kommentar: Fehler robust abfangen
+        return {}  # Kommentar: Dann leeres Dict
+    try:  # Kommentar: Fehler abfangen
         with open(USERS_FILE, "r", encoding="utf-8") as f:  # Kommentar: Datei öffnen
             data = json.load(f)  # Kommentar: JSON laden
-        if isinstance(data, dict):  # Kommentar: Typ prüfen
-            return data  # Kommentar: Daten zurück
-    except Exception:  # Kommentar: Bei Fehlern
-        return {}  # Kommentar: Leeres Dict zurück
+        if isinstance(data, dict):  # Kommentar: Format check
+            return data  # Kommentar: Zurückgeben
+    except Exception:  # Kommentar: Fehlerfall
+        return {}  # Kommentar: Fallback
     return {}  # Kommentar: Fallback
 
-def save_users(users: dict) -> None:  # Kommentar: Nutzer speichern
+def save_users(users: dict) -> None:  # Kommentar: Users speichern
     _atomic_write_json(USERS_FILE, users)  # Kommentar: Atomar schreiben
 
-def valid_username(name: str) -> bool:  # Kommentar: Username-Regeln
-    if not name or len(name) < 3 or len(name) > 32:  # Kommentar: Länge prüfen
+def valid_username(name: str) -> bool:  # Kommentar: Username validieren
+    if not name or len(name) < 3 or len(name) > 32:  # Kommentar: Längencheck
         return False  # Kommentar: Ungültig
     for ch in name:  # Kommentar: Zeichen prüfen
-        if not (ch.isalnum() or ch in ["_", "-"]):  # Kommentar: Nur a-zA-Z0-9_- erlauben
+        if not (ch.isalnum() or ch in ["_", "-"]):  # Kommentar: Nur alnum/_/-
             return False  # Kommentar: Ungültig
     return True  # Kommentar: Gültig
 
-def valid_password(pw: str) -> bool:  # Kommentar: Passwort-Regeln (MVP)
-    return isinstance(pw, str) and len(pw) >= 10  # Kommentar: Mindestens 10 Zeichen
+def valid_password(pw: str) -> bool:  # Kommentar: Passwort validieren
+    return isinstance(pw, str) and len(pw) >= 10  # Kommentar: Mindestlänge
 
-def _pbkdf2_hash(password: str, salt_hex: str, iterations: int) -> str:  # Kommentar: PBKDF2-Hash berechnen
-    salt = bytes.fromhex(salt_hex)  # Kommentar: Salt aus Hex zurück in Bytes
-    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)  # Kommentar: PBKDF2-HMAC-SHA256
-    return dk.hex()  # Kommentar: Hash als Hex-String
+def pbkdf2_hash_password(password: str, salt_hex: str) -> str:  # Kommentar: PBKDF2 Hash berechnen
+    salt = bytes.fromhex(salt_hex)  # Kommentar: Salt hex -> bytes
+    dk = hashlib.pbkdf2_hmac(PBKDF2_ALGO, password.encode("utf-8"), salt, PBKDF2_ITERATIONS)  # Kommentar: Ableitung
+    return dk.hex()  # Kommentar: Rückgabe als hex
 
-def hash_password(plain_password: str) -> dict:  # Kommentar: Passwort sicher hashen (stdlib-only)
-    salt = secrets.token_bytes(16)  # Kommentar: 16 Bytes Salt
-    iterations = 200_000  # Kommentar: Iterationszahl (gut für 2025-MVP)
-    salt_hex = salt.hex()  # Kommentar: Salt als Hex
-    hash_hex = _pbkdf2_hash(plain_password, salt_hex, iterations)  # Kommentar: Hash berechnen
-    return {"salt": salt_hex, "iterations": iterations, "hash": hash_hex}  # Kommentar: Speicherdaten zurückgeben
+def create_password_record(password: str) -> dict:  # Kommentar: Record erstellen (salt + hash)
+    salt_hex = secrets.token_bytes(SALT_BYTES).hex()  # Kommentar: Salt erzeugen
+    pw_hash_hex = pbkdf2_hash_password(password, salt_hex)  # Kommentar: Hash erzeugen
+    return {"salt": salt_hex, "hash": pw_hash_hex}  # Kommentar: Record zurückgeben
 
-def check_password(plain_password: str, stored: dict) -> bool:  # Kommentar: Passwort prüfen
-    try:  # Kommentar: Robustheit
-        salt_hex = stored.get("salt", "")  # Kommentar: Salt holen
-        iterations = int(stored.get("iterations", 0))  # Kommentar: Iterationen holen
-        hash_hex = stored.get("hash", "")  # Kommentar: Hash holen
-        if not salt_hex or not iterations or not hash_hex:  # Kommentar: Plausibilität
-            return False  # Kommentar: Ungültige gespeicherte Daten
-        calc = _pbkdf2_hash(plain_password, salt_hex, iterations)  # Kommentar: Hash neu berechnen
-        return hmac.compare_digest(calc, hash_hex)  # Kommentar: Zeitkonstanter Vergleich
-    except Exception:  # Kommentar: Bei Fehlern
-        return False  # Kommentar: Login ablehnen
+def check_password(password: str, record: dict) -> bool:  # Kommentar: Passwort prüfen
+    if not isinstance(record, dict):  # Kommentar: Typcheck
+        return False  # Kommentar: Ungültig
+    salt_hex = record.get("salt", "")  # Kommentar: Salt holen
+    stored_hash = record.get("hash", "")  # Kommentar: Hash holen
+    if not salt_hex or not stored_hash:  # Kommentar: Wenn fehlt
+        return False  # Kommentar: Ungültig
+    candidate = pbkdf2_hash_password(password, salt_hex)  # Kommentar: Kandidatenhash
+    return hmac.compare_digest(candidate, stored_hash)  # Kommentar: Konstanter Vergleich
 
-# ==========================
-# Vorlagen (deine 6 Varianten)
-# ==========================
-VORLAGEN = {  # Kommentar: Dropdown-Name -> DOCX-Dateiname
+def register_user(username: str, pw: str) -> tuple[bool, str]:  # Kommentar: Registrieren
+    users = load_users()  # Kommentar: Users laden
+    if not valid_username(username):  # Kommentar: Username prüfen
+        return False, "Benutzername ungültig (3–32 Zeichen, nur a-z A-Z 0-9 _ -)."  # Kommentar: Fehlermeldung
+    if username in users:  # Kommentar: Existiert bereits?
+        return False, "Benutzername existiert bereits."  # Kommentar: Fehlermeldung
+    if not valid_password(pw):  # Kommentar: Passwort prüfen
+        return False, "Passwort zu kurz (mindestens 10 Zeichen)."  # Kommentar: Fehlermeldung
+    users[username] = create_password_record(pw)  # Kommentar: Hash + Salt speichern
+    save_users(users)  # Kommentar: Persistieren
+    return True, "Registrierung erfolgreich. Du kannst dich jetzt einloggen."  # Kommentar: OK
+
+def login_user(username: str, pw: str) -> tuple[bool, str]:  # Kommentar: Login
+    users = load_users()  # Kommentar: Users laden
+    record = users.get(username)  # Kommentar: Record holen
+    if not record or not check_password(pw, record):  # Kommentar: Check
+        return False, "Benutzername oder Passwort falsch."  # Kommentar: Einheitliche Meldung
+    st.session_state["logged_in"] = True  # Kommentar: Session setzen
+    st.session_state["username"] = username  # Kommentar: Username speichern
+    return True, "Login erfolgreich."  # Kommentar: OK
+
+VORLAGEN = {  # Kommentar: Deine 6 Varianten
     "Fiktive Abrechnung (Reparaturschaden)": "vorlage_fiktive_abrechnung.docx",  # Kommentar: Variante 1
     "Konkrete Abrechnung < WBW": "vorlage_konkret_unter_wbw.docx",  # Kommentar: Variante 2
     "130%-Regelung": "vorlage_130_prozent.docx",  # Kommentar: Variante 3
@@ -95,191 +112,203 @@ VORLAGEN = {  # Kommentar: Dropdown-Name -> DOCX-Dateiname
     "Totalschaden Ersatzbeschaffung": "vorlage_totalschaden_ersatzbeschaffung.docx",  # Kommentar: Variante 6
 }  # Kommentar: Ende Vorlagen
 
-def resolve_vorlage_pfad(auswahl: str) -> str:  # Kommentar: Vorlage-Pfad anhand Auswahl finden
-    if auswahl not in VORLAGEN:  # Kommentar: Auswahl prüfen
-        raise ValueError(f"Unbekannte Auswahl: {auswahl}")  # Kommentar: Fehler werfen
-    dateiname = VORLAGEN[auswahl]  # Kommentar: Dateiname holen
-    if getattr(config, "VORLAGEN_ORDNER", None):  # Kommentar: Wenn Vorlagenordner definiert
-        pfad1 = os.path.join(config.VORLAGEN_ORDNER, dateiname)  # Kommentar: Pfad im Vorlagenordner
-        if os.path.isfile(pfad1):  # Kommentar: Existenz prüfen
-            return pfad1  # Kommentar: Gefunden
-    pfad2 = os.path.join(BASE_DIR, dateiname)  # Kommentar: Fallback im BASE_DIR
-    if os.path.isfile(pfad2):  # Kommentar: Existenz prüfen
-        return pfad2  # Kommentar: Gefunden
-    if os.path.isabs(dateiname) and os.path.isfile(dateiname):  # Kommentar: Falls absolute Pfade genutzt werden
-        return dateiname  # Kommentar: Direkt zurück
-    raise FileNotFoundError(f"Vorlage nicht gefunden: {dateiname}")  # Kommentar: Nichts gefunden
+def resolve_vorlage_pfad(auswahl: str) -> str:  # Kommentar: Auswahl -> Pfad
+    if auswahl not in VORLAGEN:  # Kommentar: Check
+        raise ValueError(f"Unbekannte Auswahl: {auswahl}")  # Kommentar: Fehler
+    dateiname = VORLAGEN[auswahl]  # Kommentar: Dateiname
+    if getattr(config, "VORLAGEN_ORDNER", None):  # Kommentar: Wenn Vorlagenordner gesetzt
+        pfad1 = os.path.join(config.VORLAGEN_ORDNER, dateiname)  # Kommentar: Pfad in Vorlagenordner
+        if os.path.isfile(pfad1):  # Kommentar: Existiert?
+            return pfad1  # Kommentar: Treffer
+    pfad2 = os.path.join(BASE_DIR, dateiname)  # Kommentar: Fallback in BASE_DIR
+    if os.path.isfile(pfad2):  # Kommentar: Existiert?
+        return pfad2  # Kommentar: Treffer
+    if os.path.isabs(dateiname) and os.path.isfile(dateiname):  # Kommentar: Absoluter Pfad
+        return dateiname  # Kommentar: Treffer
+    raise FileNotFoundError(f"Vorlage nicht gefunden: {dateiname}")  # Kommentar: Fehler
 
-def cleanup_files(*paths: str) -> None:  # Kommentar: Dateien nach Verarbeitung löschen
-    for path in paths:  # Kommentar: Pfade durchlaufen
-        if path and os.path.exists(path):  # Kommentar: Wenn Datei existiert
-            try:  # Kommentar: Fehler robust abfangen
-                os.remove(path)  # Kommentar: Datei löschen
-            except OSError:  # Kommentar: Falls Löschen fehlschlägt
-                pass  # Kommentar: Ignorieren (MVP)
+def cleanup_files(*paths: str) -> None:  # Kommentar: Dateien löschen
+    for path in paths:  # Kommentar: Iteration
+        if path and os.path.exists(path):  # Kommentar: Existenz
+            try:  # Kommentar: Try
+                os.remove(path)  # Kommentar: Löschen
+            except OSError:  # Kommentar: Fehler ignorieren
+                pass  # Kommentar: MVP
 
-# ==========================
-# Session / Login-State
-# ==========================
 if "logged_in" not in st.session_state:  # Kommentar: Session init
     st.session_state["logged_in"] = False  # Kommentar: Default
     st.session_state["username"] = None  # Kommentar: Default
 
-if "login_fail_count" not in st.session_state:  # Kommentar: Fail Counter init
-    st.session_state["login_fail_count"] = 0  # Kommentar: Default
+if "analysis_ready" not in st.session_state:  # Kommentar: Analyse-Flag
+    st.session_state["analysis_ready"] = False  # Kommentar: Default
+if "analysis_data" not in st.session_state:  # Kommentar: Analyse-Daten
+    st.session_state["analysis_data"] = {}  # Kommentar: Default
+if "analysis_pdf_path" not in st.session_state:  # Kommentar: PDF Pfad
+    st.session_state["analysis_pdf_path"] = ""  # Kommentar: Default
+if "analysis_ki_path" not in st.session_state:  # Kommentar: KI Pfad
+    st.session_state["analysis_ki_path"] = ""  # Kommentar: Default
+if "analysis_meta" not in st.session_state:  # Kommentar: Meta (Variante etc.)
+    st.session_state["analysis_meta"] = {}  # Kommentar: Default
 
-if "login_block_until" not in st.session_state:  # Kommentar: Block Timer init
-    st.session_state["login_block_until"] = 0.0  # Kommentar: Default
-
-def is_blocked_now() -> bool:  # Kommentar: Prüfen, ob Login gerade gesperrt ist
-    return time.time() < float(st.session_state.get("login_block_until", 0.0))  # Kommentar: Zeitvergleich
-
-def register_user(username: str, pw: str) -> tuple[bool, str]:  # Kommentar: Neuen User anlegen
-    users = load_users()  # Kommentar: Users laden
-    if not valid_username(username):  # Kommentar: Username prüfen
-        return False, "Benutzername ungültig (3–32 Zeichen, nur a-z A-Z 0-9 _ -)."  # Kommentar: Fehlertext
-    if username in users:  # Kommentar: Existiert schon?
-        return False, "Benutzername existiert bereits."  # Kommentar: Fehlertext
-    if not valid_password(pw):  # Kommentar: Passwort prüfen
-        return False, "Passwort zu kurz (mindestens 10 Zeichen)."  # Kommentar: Fehlertext
-    users[username] = hash_password(pw)  # Kommentar: Hash erzeugen und speichern
-    save_users(users)  # Kommentar: Persistieren
-    return True, "Registrierung erfolgreich. Du kannst dich jetzt einloggen."  # Kommentar: OK
-
-def login_user(username: str, pw: str) -> tuple[bool, str]:  # Kommentar: Login prüfen
-    if is_blocked_now():  # Kommentar: Block aktiv?
-        sek = int(st.session_state["login_block_until"] - time.time())  # Kommentar: Restzeit
-        return False, f"Zu viele Fehlversuche. Bitte {sek}s warten."  # Kommentar: Hinweis
-    users = load_users()  # Kommentar: Users laden
-    stored = users.get(username)  # Kommentar: User-Record holen
-    if not stored or not check_password(pw, stored):  # Kommentar: User fehlt oder Passwort falsch
-        st.session_state["login_fail_count"] += 1  # Kommentar: Fail Counter erhöhen
-        if st.session_state["login_fail_count"] >= 5:  # Kommentar: Schwelle erreicht
-            st.session_state["login_block_until"] = time.time() + 30  # Kommentar: 30s blocken
-            st.session_state["login_fail_count"] = 0  # Kommentar: Zähler resetten
-        return False, "Benutzername oder Passwort falsch."  # Kommentar: Standardtext (keine User-Enumeration)
-    st.session_state["login_fail_count"] = 0  # Kommentar: Reset bei Erfolg
-    st.session_state["login_block_until"] = 0.0  # Kommentar: Reset bei Erfolg
-    st.session_state["logged_in"] = True  # Kommentar: Login setzen
-    st.session_state["username"] = username  # Kommentar: Username setzen
-    return True, "Login erfolgreich."  # Kommentar: OK
-
-# ==========================
-# Login / Registrierung UI
-# ==========================
-if not st.session_state["logged_in"]:  # Kommentar: Wenn nicht eingeloggt
+if not st.session_state["logged_in"]:  # Kommentar: Login Screen
     st.title("Zugang geschützt")  # Kommentar: Titel
-    users = load_users()  # Kommentar: Users laden (z.B. um Registrierung ggf. zu sperren)
-    allow_registration = True  # Kommentar: Default
-    EINMALIGE_REGISTRIERUNG_GLOBAL = False  # Kommentar: Optional: auf True stellen, wenn nur 1 Registrierung insgesamt erlaubt ist
-    if EINMALIGE_REGISTRIERUNG_GLOBAL and len(users) > 0:  # Kommentar: Wenn global nur einmal und schon existiert
-        allow_registration = False  # Kommentar: Registrierung sperren
-
-    mode = st.radio(  # Kommentar: Moduswahl
-        "Aktion",  # Kommentar: Label
-        options=["Login", "Registrieren"] if allow_registration else ["Login"],  # Kommentar: Optionen
-        horizontal=True  # Kommentar: Layout
-    )  # Kommentar: Ende Radio
-
-    username = st.text_input("Benutzername")  # Kommentar: Username Input
-    pw = st.text_input("Passwort", type="password")  # Kommentar: Passwort Input
-
-    if mode == "Registrieren":  # Kommentar: Registrieren-Flow
-        pw2 = st.text_input("Passwort wiederholen", type="password")  # Kommentar: Passwort 2
+    mode = st.radio("Aktion", options=["Login", "Registrieren"], horizontal=True)  # Kommentar: Moduswahl
+    username = st.text_input("Benutzername")  # Kommentar: Username
+    pw = st.text_input("Passwort", type="password")  # Kommentar: Passwort
+    if mode == "Registrieren":  # Kommentar: Registrierung
+        pw2 = st.text_input("Passwort wiederholen", type="password")  # Kommentar: PW2
         if st.button("Registrieren"):  # Kommentar: Button
-            if pw != pw2:  # Kommentar: Match prüfen
+            if pw != pw2:  # Kommentar: Match check
                 st.error("Passwörter stimmen nicht überein.")  # Kommentar: Fehler
                 st.stop()  # Kommentar: Stop
-            ok, msg = register_user(username.strip(), pw)  # Kommentar: Registrieren
+            ok, msg = register_user(username.strip(), pw)  # Kommentar: Register call
             if ok:  # Kommentar: Erfolg
-                st.success(msg)  # Kommentar: Nachricht
+                st.success(msg)  # Kommentar: Output
             else:  # Kommentar: Fehler
-                st.error(msg)  # Kommentar: Nachricht
-        st.stop()  # Kommentar: Stop nach Register-UI
-
-    if st.button("Login"):  # Kommentar: Login-Button
-        ok, msg = login_user(username.strip(), pw)  # Kommentar: Login prüfen
+                st.error(msg)  # Kommentar: Output
+        st.stop()  # Kommentar: Ende
+    if st.button("Login"):  # Kommentar: Login button
+        ok, msg = login_user(username.strip(), pw)  # Kommentar: Login call
         if ok:  # Kommentar: Erfolg
-            st.rerun()  # Kommentar: App neu laden
-        st.error(msg)  # Kommentar: Fehler anzeigen
-        st.stop()  # Kommentar: Stop bei Fehler
-    st.stop()  # Kommentar: Stop, wenn noch kein Login
+            st.rerun()  # Kommentar: Reload
+        st.error(msg)  # Kommentar: Fehleranzeige
+        st.stop()  # Kommentar: Stop
+    st.stop()  # Kommentar: Ende
 
-# ==========================
-# App-Inhalt (nach Login)
-# ==========================
-st.title(f"Kfz-Gutachten Automatisierung - Eingeloggt als {st.session_state['username']}")  # Kommentar: Titel mit Username
+st.title(f"Kfz-Gutachten Automatisierung - Eingeloggt als {st.session_state['username']}")  # Kommentar: Titel nach Login
 
-if st.button("Logout"):  # Kommentar: Logout Button
-    st.session_state["logged_in"] = False  # Kommentar: Login-State reset
-    st.session_state["username"] = None  # Kommentar: Username reset
+if st.button("Logout"):  # Kommentar: Logout button
+    st.session_state["logged_in"] = False  # Kommentar: Reset
+    st.session_state["username"] = None  # Kommentar: Reset
+    st.session_state["analysis_ready"] = False  # Kommentar: Reset
+    st.session_state["analysis_data"] = {}  # Kommentar: Reset
+    st.session_state["analysis_meta"] = {}  # Kommentar: Reset
     st.rerun()  # Kommentar: Reload
 
 st.header("1. Abrechnungsvariante / Vorlage wählen")  # Kommentar: Abschnitt
-auswahl = st.selectbox("Welche Variante möchten Sie verwenden?", list(VORLAGEN.keys()))  # Kommentar: Dropdown Auswahl
-vorlage_pfad = resolve_vorlage_pfad(auswahl)  # Kommentar: DOCX Pfad finden
-st.caption(f"Verwendete Vorlage-Datei: {os.path.basename(vorlage_pfad)}")  # Kommentar: Info
+auswahl = st.selectbox("Welche Variante möchten Sie verwenden?", list(VORLAGEN.keys()))  # Kommentar: Auswahl
+vorlage_pfad = resolve_vorlage_pfad(auswahl)  # Kommentar: Pfad bestimmen
+st.caption(f"Verwendete Vorlage-Datei: {os.path.basename(vorlage_pfad)}")  # Kommentar: Anzeige
 
 st.header("2. Steuerstatus des Geschädigten")  # Kommentar: Abschnitt
-steuerstatus = st.selectbox(  # Kommentar: Dropdown Steuerstatus
+steuerstatus = st.selectbox(  # Kommentar: Dropdown
     "Steuerstatus",  # Kommentar: Label
     ["nicht vorsteuerabzugsberechtigt", "vorsteuerabzugsberechtigt"],  # Kommentar: Optionen
-    index=0  # Kommentar: Default
-)  # Kommentar: Ende Dropdown
+    index=0,  # Kommentar: Default
+)  # Kommentar: Ende selectbox
 
 st.header("3. Optional: Zusatzkosten")  # Kommentar: Abschnitt
-zusatzkosten_bezeichnung = st.text_input("Bezeichnung (optional)", value="")  # Kommentar: Optionaler Text
-zusatzkosten_betrag = st.text_input("Betrag in Euro (optional, z.B. 25,00)", value="")  # Kommentar: Optionaler Betrag
+zusatzkosten_bezeichnung = st.text_input("Bezeichnung (optional)", value="")  # Kommentar: Zusatzkosten Name
+zusatzkosten_betrag = st.text_input("Betrag in Euro (optional, z.B. 25,00)", value="")  # Kommentar: Zusatzkosten Betrag
 
-st.header("4. Gutachten hochladen, verarbeiten und Schreiben herunterladen")  # Kommentar: Abschnitt
+st.header("4. Gutachten hochladen")  # Kommentar: Abschnitt
 uploaded_file = st.file_uploader("Gutachten als PDF hochladen", type=["pdf"])  # Kommentar: Upload
 
-if st.button("Gutachten verarbeiten"):  # Kommentar: Start Verarbeitung
-    if uploaded_file is None:  # Kommentar: Prüfen Upload
-        st.error("Bitte zuerst eine PDF-Datei hochladen.")  # Kommentar: Fehler
+if st.button("1) Analysieren (KI)"):  # Kommentar: Schritt 1
+    if uploaded_file is None:  # Kommentar: Kein Upload?
+        st.error("Bitte zuerst eine PDF-Datei hochladen.")  # Kommentar: Hinweis
+        st.stop()  # Kommentar: Stop
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # Kommentar: Timestamp
+    safe_name = f"gutachten_{timestamp}.pdf"  # Kommentar: Safe Name
+    pdf_path = os.path.join(EINGANGS_ORDNER, safe_name)  # Kommentar: Zielpfad
+    with open(pdf_path, "wb") as f:  # Kommentar: Schreiben
+        f.write(uploaded_file.getbuffer())  # Kommentar: Bytes speichern
+    try:  # Kommentar: Fehler abfangen
+        with st.spinner("Analysiere Gutachten mit KI..."):  # Kommentar: Spinner
+            pfad_ki = programm_1_ki_input.main(pdf_path, auswahl, steuerstatus)  # Kommentar: Programm 1 starten
+            with open(pfad_ki, "r", encoding="utf-8") as f:  # Kommentar: KI-Datei lesen
+                ki_text = f.read()  # Kommentar: Text lesen
+            daten = programm_2_word_output.json_aus_ki_antwort_parsen(ki_text)  # Kommentar: JSON aus KI parsen
+        st.session_state["analysis_ready"] = True  # Kommentar: Flag setzen
+        st.session_state["analysis_data"] = daten  # Kommentar: Daten speichern
+        st.session_state["analysis_pdf_path"] = pdf_path  # Kommentar: PDF Pfad speichern
+        st.session_state["analysis_ki_path"] = pfad_ki  # Kommentar: KI Pfad speichern
+        st.session_state["analysis_meta"] = {  # Kommentar: Meta speichern (damit Nutzer nicht “umstellt”)
+            "auswahl": auswahl,  # Kommentar: Variante
+            "steuerstatus": steuerstatus,  # Kommentar: Steuerstatus
+            "vorlage_pfad": vorlage_pfad,  # Kommentar: Vorlagepfad
+        }  # Kommentar: Ende Meta
+        st.success("Analyse abgeschlossen. Bitte Daten prüfen und korrigieren.")  # Kommentar: Info
+    except Exception as e:  # Kommentar: Fehlerfall
+        st.error(f"Fehler bei der Analyse: {e}")  # Kommentar: Anzeige
+        cleanup_files(pdf_path)  # Kommentar: PDF im Fehlerfall löschen
         st.stop()  # Kommentar: Stop
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # Kommentar: Timestamp
-    safe_name = f"gutachten_{timestamp}.pdf"  # Kommentar: Sicherer Dateiname
-    pdf_path = os.path.join(EINGANGS_ORDNER, safe_name)  # Kommentar: Zielpfad
+if st.session_state.get("analysis_ready"):  # Kommentar: Wenn Analyse vorhanden
+    meta = st.session_state.get("analysis_meta", {})  # Kommentar: Meta laden
+    st.header("5. Daten prüfen & korrigieren")  # Kommentar: Abschnitt
+    st.caption(f"Analyse basiert auf: {meta.get('auswahl','')} | Steuerstatus: {meta.get('steuerstatus','')}")  # Kommentar: Info
 
-    with open(pdf_path, "wb") as f:  # Kommentar: PDF speichern
-        f.write(uploaded_file.getbuffer())  # Kommentar: Bytes schreiben
+    data = dict(st.session_state.get("analysis_data", {}))  # Kommentar: Kopie der Daten
 
-    try:  # Kommentar: Verarbeitung try
-        with st.spinner("Verarbeite Gutachten mit KI..."):  # Kommentar: Spinner
-            pfad_ki = programm_1_ki_input.main(pdf_path, auswahl, steuerstatus)  # Kommentar: Programm 1 aufrufen
+    st.subheader("Wichtige Felder")  # Kommentar: Untertitel
 
-            docx_pfad = programm_2_word_output.main(  # Kommentar: Programm 2 aufrufen
-                pfad_ki_txt=pfad_ki,  # Kommentar: Pfad zur KI-TXT
-                vorlage_pfad=vorlage_pfad,  # Kommentar: Pfad zur Word-Vorlage
-                auswahl=auswahl,  # Kommentar: Variante
-                steuerstatus=steuerstatus,  # Kommentar: Steuerstatus
-                zus_bez=zusatzkosten_bezeichnung,  # Kommentar: Zusatzkosten-Bezeichnung
-                zus_betrag=zusatzkosten_betrag,  # Kommentar: Zusatzkosten-Betrag
-            )  # Kommentar: Ende Programm 2
+    data["SCHADENSNUMMER"] = st.text_input("Schadensnummer", value=str(data.get("SCHADENSNUMMER", "")))  # Kommentar: Input
+    data["AKTENZEICHEN"] = st.text_input("Aktenzeichen", value=str(data.get("AKTENZEICHEN", "")))  # Kommentar: Input
+    data["MANDANT_NAME"] = st.text_input("Mandant Name", value=str(data.get("MANDANT_NAME", "")))  # Kommentar: Input
+    data["UNFALL_DATUM"] = st.text_input("Unfall Datum (TT.MM.JJJJ)", value=str(data.get("UNFALL_DATUM", "")))  # Kommentar: Input
+    data["UNFALL_UHRZEIT"] = st.text_input("Unfall Uhrzeit (HH:MM)", value=str(data.get("UNFALL_UHRZEIT", "")))  # Kommentar: Input
+    data["UNFALLORT"] = st.text_input("Unfallort", value=str(data.get("UNFALLORT", "")))  # Kommentar: Input
+    data["UNFALL_STRASSE"] = st.text_input("Unfallstraße", value=str(data.get("UNFALL_STRASSE", "")))  # Kommentar: Input
+    data["FAHRZEUGTYP"] = st.text_input("Fahrzeugtyp", value=str(data.get("FAHRZEUGTYP", "")))  # Kommentar: Input
+    data["KENNZEICHEN"] = st.text_input("Kennzeichen", value=str(data.get("KENNZEICHEN", "")))  # Kommentar: Input
 
-        with open(docx_pfad, "rb") as f:  # Kommentar: DOCX in Memory laden
-            docx_bytes = f.read()  # Kommentar: Bytes lesen
+    st.subheader("Kosten")  # Kommentar: Untertitel
 
-        cleanup_files(pdf_path, pfad_ki, docx_pfad)  # Kommentar: Dateien löschen
+    data["REPARATURKOSTEN"] = st.text_input("Reparaturkosten", value=str(data.get("REPARATURKOSTEN", "")))  # Kommentar: Input
+    data["WERTMINDERUNG"] = st.text_input("Wertminderung", value=str(data.get("WERTMINDERUNG", "")))  # Kommentar: Input
+    data["KOSTENPAUSCHALE"] = st.text_input("Kostenpauschale", value=str(data.get("KOSTENPAUSCHALE", "")))  # Kommentar: Input
+    data["GUTACHTERKOSTEN"] = st.text_input("Gutachterkosten", value=str(data.get("GUTACHTERKOSTEN", "")))  # Kommentar: Input
+    data["NUTZUNGSAUSFALL"] = st.text_input("Nutzungsausfall (Betrag oder Tagessatz je nach Vorlage)", value=str(data.get("NUTZUNGSAUSFALL", "")))  # Kommentar: Input
+    data["MWST_BETRAG"] = st.text_input("MwSt-Betrag (wird ggf. automatisch geleert)", value=str(data.get("MWST_BETRAG", "")))  # Kommentar: Input
 
-        st.success("Verarbeitung abgeschlossen. Dateien wurden gelöscht.")  # Kommentar: Erfolg
-        st.download_button(  # Kommentar: Download-Button
-            label="Erstelltes Anwaltsschreiben herunterladen",  # Kommentar: Label
-            data=docx_bytes,  # Kommentar: Daten
-            file_name=os.path.basename(docx_pfad),  # Kommentar: Dateiname
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # Kommentar: MIME
-        )  # Kommentar: Ende Button
+    with st.expander("Alle Felder (optional)"):  # Kommentar: Expander
+        for k in sorted(list(data.keys())):  # Kommentar: Keys sortieren
+            if k in ["SCHADENSNUMMER", "AKTENZEICHEN", "MANDANT_NAME", "UNFALL_DATUM", "UNFALL_UHRZEIT", "UNFALLORT", "UNFALL_STRASSE", "FAHRZEUGTYP", "KENNZEICHEN", "REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN", "NUTZUNGSAUSFALL", "MWST_BETRAG"]:  # Kommentar: Schon oben
+                continue  # Kommentar: Überspringen
+            data[k] = st.text_input(f"{k}", value=str(data.get(k, "")))  # Kommentar: Generische Inputs
 
-    except Exception as e:  # Kommentar: Fehlerfall
-        st.error(f"Fehler bei der Verarbeitung: {e}")  # Kommentar: Fehler anzeigen
+    st.session_state["analysis_data"] = data  # Kommentar: Zurück in Session speichern
 
-with st.expander("Debug"):  # Kommentar: Debug Bereich
-    st.write({  # Kommentar: Debug Daten
-        "auswahl": auswahl,  # Kommentar: Auswahl
-        "steuerstatus": steuerstatus,  # Kommentar: Steuerstatus
-        "eingang": os.listdir(EINGANGS_ORDNER),  # Kommentar: Dateien Eingang
-        "ki": os.listdir(KI_ANTWORT_ORDNER),  # Kommentar: Dateien KI
-        "ausgang": os.listdir(AUSGANGS_ORDNER),  # Kommentar: Dateien Ausgang
-    })  # Kommentar: Ende Debug
+    if st.button("2) Schreiben erzeugen (DOCX)"):  # Kommentar: Schritt 2
+        try:  # Kommentar: Fehler abfangen
+            with st.spinner("Erzeuge Word-Dokument..."):  # Kommentar: Spinner
+                used_meta = st.session_state.get("analysis_meta", {})  # Kommentar: Meta holen
+                docx_pfad = programm_2_word_output.generate_from_data(  # Kommentar: DOCX direkt aus korrigierten Daten
+                    daten=st.session_state["analysis_data"],  # Kommentar: Korrigierte Daten
+                    vorlage_pfad=used_meta.get("vorlage_pfad", vorlage_pfad),  # Kommentar: Vorlage verwenden, die zur Analyse passt
+                    auswahl=used_meta.get("auswahl", auswahl),  # Kommentar: Variante von Analyse verwenden
+                    steuerstatus=used_meta.get("steuerstatus", steuerstatus),  # Kommentar: Steuerstatus von Analyse verwenden
+                    zus_bez=zusatzkosten_bezeichnung,  # Kommentar: Zusatzkosten Name
+                    zus_betrag=zusatzkosten_betrag,  # Kommentar: Zusatzkosten Betrag
+                )  # Kommentar: Ende call
+            with open(docx_pfad, "rb") as f:  # Kommentar: DOCX lesen
+                docx_bytes = f.read()  # Kommentar: Bytes lesen
+
+            cleanup_files(st.session_state.get("analysis_pdf_path", ""))  # Kommentar: PDF löschen
+            cleanup_files(st.session_state.get("analysis_ki_path", ""))  # Kommentar: KI-Text löschen
+            cleanup_files(docx_pfad)  # Kommentar: DOCX auf Server löschen (wir haben Bytes)
+
+            st.session_state["analysis_ready"] = False  # Kommentar: Reset
+            st.session_state["analysis_data"] = {}  # Kommentar: Reset
+            st.session_state["analysis_meta"] = {}  # Kommentar: Reset
+            st.session_state["analysis_pdf_path"] = ""  # Kommentar: Reset
+            st.session_state["analysis_ki_path"] = ""  # Kommentar: Reset
+
+            st.download_button(  # Kommentar: Download Button
+                label="Erstelltes Anwaltsschreiben herunterladen",  # Kommentar: Label
+                data=docx_bytes,  # Kommentar: DOCX Bytes
+                file_name="anwaltsschreiben.docx",  # Kommentar: Downloadname
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # Kommentar: MIME
+            )  # Kommentar: Ende download
+            st.success("Fertig. Dateien wurden gelöscht.")  # Kommentar: Erfolg
+        except Exception as e:  # Kommentar: Fehlerfall
+            st.error(f"Fehler beim Erzeugen: {e}")  # Kommentar: Anzeige
+
+with st.expander("Debug: Dateien im System anzeigen"):  # Kommentar: Debug Bereich
+    st.subheader("Eingang Gutachten")  # Kommentar: Untertitel
+    st.write(os.listdir(EINGANGS_ORDNER))  # Kommentar: Liste anzeigen
+    st.subheader("KI-Antworten")  # Kommentar: Untertitel
+    st.write(os.listdir(KI_ANTWORT_ORDNER))  # Kommentar: Liste anzeigen
+    st.subheader("Ausgang-Schreiben")  # Kommentar: Untertitel
+    st.write(os.listdir(AUSGANGS_ORDNER))  # Kommentar: Liste anzeigen
