@@ -54,9 +54,33 @@ INHALT (nur wenn vorhanden):
 - Kurze Beschreibung des Ablaufs (nur wenn eindeutig)
 - Schadenseintritt (z.B. Kollision/Anstoß – nur wenn eindeutig)
 
+4. SCHADENHERGANG (WICHTIG – für Word als Absatz, aber TEXTTREU):
+
+ZIEL:
+- Das Feld "SCHADENHERGANG" soll als zusammenhängender Absatz in die Word-Vorlage passen.
+- ABER: Der Inhalt muss trotzdem AUS dem Gutachten-Text stammen (texttreu).
+
+VORGEHEN:
+A) Suche eine Überschrift/Section wie:
+   "Schadenhergang", "Schadenshergang", "Unfallhergang", "Sachverhalt", "Unfallschilderung".
+B) Wenn gefunden:
+   - Übernimm den Textabschnitt DIREKT unter dieser Überschrift möglichst WÖRTLICH.
+   - Keine eigene Zusammenfassung, keine neuen Sätze, keine Umformulierungen.
+   - Du darfst nur kürzen (z.B. auf 800–1500 Zeichen), aber nicht neu schreiben.
+   - Stoppe beim nächsten klaren Kapitel/Überschrift.
+C) Wenn NICHT gefunden:
+   - SCHADENHERGANG = "" (leer).
+   - KEIN Ersatztext wie "Der Unfall ereignete sich ..." – lieber leer als erfunden/abgeleitet.
+
+Mindestlänge-Regel:
+- Wenn ein passender Abschnitt gefunden wurde und er mindestens 250 Zeichen enthält:
+  -> Gib mindestens 70 Zeichen davon in SCHADENHERGANG zurück.
+- Wenn der Abschnitt kürzer ist oder nur aus 1 Zeile besteht:
+  -> SCHADENHERGANG = "".
+
 FORMAT:
-- Ein zusammenhängender Absatz (keine Stichpunkte).
-- Keine Anführungszeichen, keine Überschrift davor.
+- Ein zusammenhängender Absatz (keine Bulletpoints).
+- Keine Überschrift davor.
 """
 
 # ==========================
