@@ -4,3 +4,4 @@ docxtpl
 google-genai
 requests
 bcrypt
+python-docx
