@@ -1,14 +1,13 @@
 # app.py  # Kommentar: Streamlit App (Upload -> KI Analyse -> Korrektur -> Word erzeugen)
 
 import os  # Kommentar: Für Dateipfade und Ordner
-import json  # Kommentar: Für Users.json Speicherung
-import time  # Kommentar: Für einfache Bremse / Timing
+import json  # Kommentar: Für JSON (Users / KI-Zwischenformat)
+import time  # Kommentar: Für Timing (optional)
 import hashlib  # Kommentar: Für PBKDF2 Passwort-Hashing (ohne externe Library)
 import hmac  # Kommentar: Für konstanten Zeitvergleich beim Login
 import secrets  # Kommentar: Für kryptografisch sicheren Salt
 from datetime import datetime  # Kommentar: Für Zeitstempel bei Dateinamen
 import streamlit as st  # Kommentar: Streamlit UI
-from docxtpl import DocxTemplate  # Kommentar: Für Platzhalter-Analyse (optional)
 
 import config  # Kommentar: Konfigurationsdatei (Ordnerpfade / Vorlagenordner)
 import programm_1_ki_input  # Kommentar: Programm 1: PDF -> KI -> _ki.txt
@@ -19,23 +18,59 @@ EINGANGS_ORDNER = config.EINGANGS_ORDNER  # Kommentar: PDF Eingang
 KI_ANTWORT_ORDNER = config.KI_ANTWORT_ORDNER  # Kommentar: KI Antworten Ordner
 AUSGANGS_ORDNER = os.path.join(BASE_DIR, "ausgang_schreiben")  # Kommentar: DOCX Ausgabe Ordner
 
-os.makedirs(EINGANGS_ORDNER, exist_ok=True)  # Kommentar: Ordner anlegen, falls nicht vorhanden
-os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)  # Kommentar: Ordner anlegen, falls nicht vorhanden
-os.makedirs(AUSGANGS_ORDNER, exist_ok=True)  # Kommentar: Ordner anlegen, falls nicht vorhanden
+os.makedirs(EINGANGS_ORDNER, exist_ok=True)  # Kommentar: Ordner anlegen (falls nicht vorhanden)
+os.makedirs(KI_ANTWORT_ORDNER, exist_ok=True)  # Kommentar: Ordner anlegen (falls nicht vorhanden)
+os.makedirs(AUSGANGS_ORDNER, exist_ok=True)  # Kommentar: Ordner anlegen (falls nicht vorhanden)
 
 st.set_page_config(page_title="Kfz-Gutachten → Anwaltsschreiben", layout="centered")  # Kommentar: Streamlit Setup
 
 USERS_FILE = os.path.join(BASE_DIR, "users.json")  # Kommentar: User-Speicherdatei (Hash + Salt)
 PBKDF2_ITERATIONS = 200_000  # Kommentar: PBKDF2 Iterationen (MVP-sicher)
 PBKDF2_ALGO = "sha256"  # Kommentar: PBKDF2 Hash Algorithmus
-SALT_BYTES = 16  # Kommentar: Salt Länge
+SALT_BYTES = 16  # Kommentar: Salt Länge (Bytes)
 
+# ==========================
+# Prompt-Baustein (nur Anzeige / Copy-Paste in Programm 1)
+# ==========================
+SCHADENHERGANG_WORDTAUGLICH_PROMPT = """\
+WICHTIG: Feld SCHADENHERGANG (Word-tauglich)
+
+Das Feld "SCHADENHERGANG" soll NICHT als roher Gutachten-Abschnitt ausgegeben werden,
+sondern als SCHREIBFERTIGER Absatz für ein Anwaltsschreiben.
+
+REGELN:
+- Verwende ausschließlich Informationen, die eindeutig im Gutachten-Text stehen.
+- Erfinde nichts, rate nichts. Wenn wesentliche Infos fehlen: SCHADENHERGANG = "".
+- Maximal 3–6 Sätze, sachlich und neutral.
+- Keine Schuldzuweisung, keine rechtliche Bewertung, keine Floskeln.
+- Wenn im Gutachten ein Abschnitt "Schadenhergang/Unfallhergang/Sachverhalt" existiert:
+  Nutze nur dessen Inhalt als Grundlage (nicht andere Stellen).
+- Wenn kein klarer Abschnitt vorhanden ist: SCHADENHERGANG = "".
+
+INHALT (nur wenn vorhanden):
+- Unfallzeitpunkt (Datum + Uhrzeit)
+- Unfallort (Ort + Straße)
+- Beteiligte Fahrzeuge (Fahrzeugtyp/Kennzeichen nur wenn genannt)
+- Kurze Beschreibung des Ablaufs (nur wenn eindeutig)
+- Schadenseintritt (z.B. Kollision/Anstoß – nur wenn eindeutig)
+
+FORMAT:
+- Ein zusammenhängender Absatz (keine Stichpunkte).
+- Keine Anführungszeichen, keine Überschrift davor.
+"""
+
+# ==========================
+# Helper: JSON atomar schreiben
+# ==========================
 def _atomic_write_json(path: str, data: dict) -> None:  # Kommentar: JSON atomar speichern (verhindert kaputte Datei)
     tmp = path + ".tmp"  # Kommentar: Temp-Datei
     with open(tmp, "w", encoding="utf-8") as f:  # Kommentar: Temp-Datei öffnen
         json.dump(data, f, ensure_ascii=False, indent=2)  # Kommentar: JSON schreiben
     os.replace(tmp, path)  # Kommentar: Temp-Datei atomar ersetzen
 
+# ==========================
+# User Storage
+# ==========================
 def load_users() -> dict:  # Kommentar: Users.json laden
     if not os.path.isfile(USERS_FILE):  # Kommentar: Wenn Datei nicht existiert
         return {}  # Kommentar: Dann leeres Dict
@@ -85,12 +120,12 @@ def check_password(password: str, record: dict) -> bool:  # Kommentar: Passwort 
 def register_user(username: str, pw: str) -> tuple[bool, str]:  # Kommentar: Registrieren
     users = load_users()  # Kommentar: Users laden
     if not valid_username(username):  # Kommentar: Username prüfen
-        return False, "Benutzername ungültig (3–32 Zeichen, nur a-z A-Z 0-9 _ -)."  # Kommentar: Fehlermeldung
+        return False, "Benutzername ungültig (3–32 Zeichen, nur a-z A-Z 0-9 _ -)."  # Kommentar: Meldung
     if username in users:  # Kommentar: Existiert bereits?
-        return False, "Benutzername existiert bereits."  # Kommentar: Fehlermeldung
+        return False, "Benutzername existiert bereits."  # Kommentar: Meldung
     if not valid_password(pw):  # Kommentar: Passwort prüfen
-        return False, "Passwort zu kurz (mindestens 10 Zeichen)."  # Kommentar: Fehlermeldung
-    users[username] = create_password_record(pw)  # Kommentar: Hash + Salt speichern
+        return False, "Passwort zu kurz (mindestens 10 Zeichen)."  # Kommentar: Meldung
+    users[username] = create_password_record(pw)  # Kommentar: Hash+Salt speichern
     save_users(users)  # Kommentar: Persistieren
     return True, "Registrierung erfolgreich. Du kannst dich jetzt einloggen."  # Kommentar: OK
 
@@ -100,9 +135,12 @@ def login_user(username: str, pw: str) -> tuple[bool, str]:  # Kommentar: Login
     if not record or not check_password(pw, record):  # Kommentar: Check
         return False, "Benutzername oder Passwort falsch."  # Kommentar: Einheitliche Meldung
     st.session_state["logged_in"] = True  # Kommentar: Session setzen
-    st.session_state["username"] = username  # Kommentar: Username speichern
+    st.session_state["username"] = username  # Kommentar: Username setzen
     return True, "Login erfolgreich."  # Kommentar: OK
 
+# ==========================
+# Vorlagen-Auswahl
+# ==========================
 VORLAGEN = {  # Kommentar: Deine 6 Varianten
     "Fiktive Abrechnung (Reparaturschaden)": "vorlage_fiktive_abrechnung.docx",  # Kommentar: Variante 1
     "Konkrete Abrechnung < WBW": "vorlage_konkret_unter_wbw.docx",  # Kommentar: Variante 2
@@ -117,7 +155,7 @@ def resolve_vorlage_pfad(auswahl: str) -> str:  # Kommentar: Auswahl -> Pfad
         raise ValueError(f"Unbekannte Auswahl: {auswahl}")  # Kommentar: Fehler
     dateiname = VORLAGEN[auswahl]  # Kommentar: Dateiname
     if getattr(config, "VORLAGEN_ORDNER", None):  # Kommentar: Wenn Vorlagenordner gesetzt
-        pfad1 = os.path.join(config.VORLAGEN_ORDNER, dateiname)  # Kommentar: Pfad in Vorlagenordner
+        pfad1 = os.path.join(config.VORLAGEN_ORDNER, dateiname)  # Kommentar: Pfad
         if os.path.isfile(pfad1):  # Kommentar: Existiert?
             return pfad1  # Kommentar: Treffer
     pfad2 = os.path.join(BASE_DIR, dateiname)  # Kommentar: Fallback in BASE_DIR
@@ -127,14 +165,57 @@ def resolve_vorlage_pfad(auswahl: str) -> str:  # Kommentar: Auswahl -> Pfad
         return dateiname  # Kommentar: Treffer
     raise FileNotFoundError(f"Vorlage nicht gefunden: {dateiname}")  # Kommentar: Fehler
 
+# ==========================
+# Datei-Cleanup
+# ==========================
 def cleanup_files(*paths: str) -> None:  # Kommentar: Dateien löschen
-    for path in paths:  # Kommentar: Iteration
-        if path and os.path.exists(path):  # Kommentar: Existenz
+    for path in paths:  # Kommentar: Iterieren
+        if path and os.path.exists(path):  # Kommentar: Existenz prüfen
             try:  # Kommentar: Try
                 os.remove(path)  # Kommentar: Löschen
             except OSError:  # Kommentar: Fehler ignorieren
                 pass  # Kommentar: MVP
 
+# ==========================
+# Wrapper: DOCX aus korrigierten Daten erzeugen (robust)
+# ==========================
+def generate_docx_from_corrected_data(  # Kommentar: Erzeugt DOCX aus Daten, egal ob programm_2 generate_from_data existiert
+    daten: dict,  # Kommentar: Korrigierte Daten
+    vorlage_pfad: str,  # Kommentar: Vorlagepfad
+    auswahl: str,  # Kommentar: Variante
+    steuerstatus: str,  # Kommentar: Steuerstatus
+    zus_bez: str,  # Kommentar: Zusatzkosten-Bezeichnung
+    zus_betrag: str,  # Kommentar: Zusatzkosten-Betrag
+) -> str:  # Kommentar: Gibt Pfad zur DOCX zurück
+    if hasattr(programm_2_word_output, "generate_from_data"):  # Kommentar: Wenn Funktion existiert
+        return programm_2_word_output.generate_from_data(  # Kommentar: Direkt nutzen
+            daten=daten,  # Kommentar: Daten
+            vorlage_pfad=vorlage_pfad,  # Kommentar: Vorlage
+            auswahl=auswahl,  # Kommentar: Variante
+            steuerstatus=steuerstatus,  # Kommentar: Steuerstatus
+            zus_bez=zus_bez,  # Kommentar: Zusatzname
+            zus_betrag=zus_betrag,  # Kommentar: Zusatzbetrag
+        )  # Kommentar: Return
+    tmp_name = f"corrected_{datetime.now().strftime('%Y%m%d_%H%M%S')}_ki.txt"  # Kommentar: Temp-Dateiname
+    tmp_path = os.path.join(KI_ANTWORT_ORDNER, tmp_name)  # Kommentar: Temp-Pfad
+    wrapper_text = "JSON_START\n" + json.dumps(daten, ensure_ascii=False, indent=2) + "\nJSON_END\n"  # Kommentar: KI-Wrapper bauen
+    with open(tmp_path, "w", encoding="utf-8") as f:  # Kommentar: Schreiben
+        f.write(wrapper_text)  # Kommentar: Inhalt schreiben
+    try:  # Kommentar: Try
+        return programm_2_word_output.main(  # Kommentar: Fallback: main nutzen
+            pfad_ki_txt=tmp_path,  # Kommentar: Temp-KI-Datei
+            vorlage_pfad=vorlage_pfad,  # Kommentar: Vorlage
+            auswahl=auswahl,  # Kommentar: Variante
+            steuerstatus=steuerstatus,  # Kommentar: Steuerstatus
+            zus_bez=zus_bez,  # Kommentar: Zusatzname
+            zus_betrag=zus_betrag,  # Kommentar: Zusatzbetrag
+        )  # Kommentar: Return
+    finally:  # Kommentar: Cleanup
+        cleanup_files(tmp_path)  # Kommentar: Temp-Datei löschen
+
+# ==========================
+# Session State init
+# ==========================
 if "logged_in" not in st.session_state:  # Kommentar: Session init
     st.session_state["logged_in"] = False  # Kommentar: Default
     st.session_state["username"] = None  # Kommentar: Default
@@ -150,6 +231,9 @@ if "analysis_ki_path" not in st.session_state:  # Kommentar: KI Pfad
 if "analysis_meta" not in st.session_state:  # Kommentar: Meta (Variante etc.)
     st.session_state["analysis_meta"] = {}  # Kommentar: Default
 
+# ==========================
+# Login UI
+# ==========================
 if not st.session_state["logged_in"]:  # Kommentar: Login Screen
     st.title("Zugang geschützt")  # Kommentar: Titel
     mode = st.radio("Aktion", options=["Login", "Registrieren"], horizontal=True)  # Kommentar: Moduswahl
@@ -175,6 +259,9 @@ if not st.session_state["logged_in"]:  # Kommentar: Login Screen
         st.stop()  # Kommentar: Stop
     st.stop()  # Kommentar: Ende
 
+# ==========================
+# App UI (nach Login)
+# ==========================
 st.title(f"Kfz-Gutachten Automatisierung - Eingeloggt als {st.session_state['username']}")  # Kommentar: Titel nach Login
 
 if st.button("Logout"):  # Kommentar: Logout button
@@ -183,6 +270,8 @@ if st.button("Logout"):  # Kommentar: Logout button
     st.session_state["analysis_ready"] = False  # Kommentar: Reset
     st.session_state["analysis_data"] = {}  # Kommentar: Reset
     st.session_state["analysis_meta"] = {}  # Kommentar: Reset
+    st.session_state["analysis_pdf_path"] = ""  # Kommentar: Reset
+    st.session_state["analysis_ki_path"] = ""  # Kommentar: Reset
     st.rerun()  # Kommentar: Reload
 
 st.header("1. Abrechnungsvariante / Vorlage wählen")  # Kommentar: Abschnitt
@@ -204,6 +293,9 @@ zusatzkosten_betrag = st.text_input("Betrag in Euro (optional, z.B. 25,00)", val
 st.header("4. Gutachten hochladen")  # Kommentar: Abschnitt
 uploaded_file = st.file_uploader("Gutachten als PDF hochladen", type=["pdf"])  # Kommentar: Upload
 
+# ==========================
+# Schritt 1: Analyse
+# ==========================
 if st.button("1) Analysieren (KI)"):  # Kommentar: Schritt 1
     if uploaded_file is None:  # Kommentar: Kein Upload?
         st.error("Bitte zuerst eine PDF-Datei hochladen.")  # Kommentar: Hinweis
@@ -211,7 +303,7 @@ if st.button("1) Analysieren (KI)"):  # Kommentar: Schritt 1
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # Kommentar: Timestamp
     safe_name = f"gutachten_{timestamp}.pdf"  # Kommentar: Safe Name
     pdf_path = os.path.join(EINGANGS_ORDNER, safe_name)  # Kommentar: Zielpfad
-    with open(pdf_path, "wb") as f:  # Kommentar: Schreiben
+    with open(pdf_path, "wb") as f:  # Kommentar: Speichern
         f.write(uploaded_file.getbuffer())  # Kommentar: Bytes speichern
     try:  # Kommentar: Fehler abfangen
         with st.spinner("Analysiere Gutachten mit KI..."):  # Kommentar: Spinner
@@ -234,10 +326,16 @@ if st.button("1) Analysieren (KI)"):  # Kommentar: Schritt 1
         cleanup_files(pdf_path)  # Kommentar: PDF im Fehlerfall löschen
         st.stop()  # Kommentar: Stop
 
+# ==========================
+# Schritt 2: Korrektur + DOCX
+# ==========================
 if st.session_state.get("analysis_ready"):  # Kommentar: Wenn Analyse vorhanden
     meta = st.session_state.get("analysis_meta", {})  # Kommentar: Meta laden
     st.header("5. Daten prüfen & korrigieren")  # Kommentar: Abschnitt
     st.caption(f"Analyse basiert auf: {meta.get('auswahl','')} | Steuerstatus: {meta.get('steuerstatus','')}")  # Kommentar: Info
+
+    with st.expander("Prompt-Baustein für Programm 1 (SCHADENHERGANG Word-tauglich)"):  # Kommentar: Expander
+        st.code(SCHADENHERGANG_WORDTAUGLICH_PROMPT, language="text")  # Kommentar: Prompt anzeigen
 
     data = dict(st.session_state.get("analysis_data", {}))  # Kommentar: Kopie der Daten
 
@@ -253,18 +351,31 @@ if st.session_state.get("analysis_ready"):  # Kommentar: Wenn Analyse vorhanden
     data["FAHRZEUGTYP"] = st.text_input("Fahrzeugtyp", value=str(data.get("FAHRZEUGTYP", "")))  # Kommentar: Input
     data["KENNZEICHEN"] = st.text_input("Kennzeichen", value=str(data.get("KENNZEICHEN", "")))  # Kommentar: Input
 
+    st.subheader("Schadenshergang (für Word – als Absatz)")  # Kommentar: Untertitel
+    data["SCHADENHERGANG"] = st.text_area(  # Kommentar: Textarea für SCHADENHERGANG
+        "SCHADENHERGANG",  # Kommentar: Label
+        value=str(data.get("SCHADENHERGANG", "")),  # Kommentar: Value
+        height=160,  # Kommentar: Höhe
+        help="Hier soll ein schreibfertiger, neutraler Absatz stehen (3–6 Sätze). Falls unklar: leer lassen.",  # Kommentar: Hilfe
+    )  # Kommentar: Ende Textarea
+
     st.subheader("Kosten")  # Kommentar: Untertitel
 
     data["REPARATURKOSTEN"] = st.text_input("Reparaturkosten", value=str(data.get("REPARATURKOSTEN", "")))  # Kommentar: Input
     data["WERTMINDERUNG"] = st.text_input("Wertminderung", value=str(data.get("WERTMINDERUNG", "")))  # Kommentar: Input
     data["KOSTENPAUSCHALE"] = st.text_input("Kostenpauschale", value=str(data.get("KOSTENPAUSCHALE", "")))  # Kommentar: Input
     data["GUTACHTERKOSTEN"] = st.text_input("Gutachterkosten", value=str(data.get("GUTACHTERKOSTEN", "")))  # Kommentar: Input
-    data["NUTZUNGSAUSFALL"] = st.text_input("Nutzungsausfall (Betrag oder Tagessatz je nach Vorlage)", value=str(data.get("NUTZUNGSAUSFALL", "")))  # Kommentar: Input
-    data["MWST_BETRAG"] = st.text_input("MwSt-Betrag (wird ggf. automatisch geleert)", value=str(data.get("MWST_BETRAG", "")))  # Kommentar: Input
+    data["NUTZUNGSAUSFALL"] = st.text_input("Nutzungsausfall", value=str(data.get("NUTZUNGSAUSFALL", "")))  # Kommentar: Input
+    data["MWST_BETRAG"] = st.text_input("MwSt-Betrag (wird je nach Fall ggf. leer)", value=str(data.get("MWST_BETRAG", "")))  # Kommentar: Input
 
     with st.expander("Alle Felder (optional)"):  # Kommentar: Expander
+        skip_keys = {  # Kommentar: Keys, die schon oben gepflegt werden
+            "SCHADENSNUMMER", "AKTENZEICHEN", "MANDANT_NAME", "UNFALL_DATUM", "UNFALL_UHRZEIT", "UNFALLORT",
+            "UNFALL_STRASSE", "FAHRZEUGTYP", "KENNZEICHEN", "SCHADENHERGANG", "REPARATURKOSTEN", "WERTMINDERUNG",
+            "KOSTENPAUSCHALE", "GUTACHTERKOSTEN", "NUTZUNGSAUSFALL", "MWST_BETRAG",
+        }  # Kommentar: Ende Skip
         for k in sorted(list(data.keys())):  # Kommentar: Keys sortieren
-            if k in ["SCHADENSNUMMER", "AKTENZEICHEN", "MANDANT_NAME", "UNFALL_DATUM", "UNFALL_UHRZEIT", "UNFALLORT", "UNFALL_STRASSE", "FAHRZEUGTYP", "KENNZEICHEN", "REPARATURKOSTEN", "WERTMINDERUNG", "KOSTENPAUSCHALE", "GUTACHTERKOSTEN", "NUTZUNGSAUSFALL", "MWST_BETRAG"]:  # Kommentar: Schon oben
+            if k in skip_keys:  # Kommentar: Skip?
                 continue  # Kommentar: Überspringen
             data[k] = st.text_input(f"{k}", value=str(data.get(k, "")))  # Kommentar: Generische Inputs
 
@@ -274,14 +385,15 @@ if st.session_state.get("analysis_ready"):  # Kommentar: Wenn Analyse vorhanden
         try:  # Kommentar: Fehler abfangen
             with st.spinner("Erzeuge Word-Dokument..."):  # Kommentar: Spinner
                 used_meta = st.session_state.get("analysis_meta", {})  # Kommentar: Meta holen
-                docx_pfad = programm_2_word_output.generate_from_data(  # Kommentar: DOCX direkt aus korrigierten Daten
+                docx_pfad = generate_docx_from_corrected_data(  # Kommentar: DOCX aus korrigierten Daten erstellen
                     daten=st.session_state["analysis_data"],  # Kommentar: Korrigierte Daten
-                    vorlage_pfad=used_meta.get("vorlage_pfad", vorlage_pfad),  # Kommentar: Vorlage verwenden, die zur Analyse passt
-                    auswahl=used_meta.get("auswahl", auswahl),  # Kommentar: Variante von Analyse verwenden
-                    steuerstatus=used_meta.get("steuerstatus", steuerstatus),  # Kommentar: Steuerstatus von Analyse verwenden
+                    vorlage_pfad=used_meta.get("vorlage_pfad", vorlage_pfad),  # Kommentar: Analyse-Vorlage nutzen
+                    auswahl=used_meta.get("auswahl", auswahl),  # Kommentar: Analyse-Variante nutzen
+                    steuerstatus=used_meta.get("steuerstatus", steuerstatus),  # Kommentar: Analyse-Steuerstatus nutzen
                     zus_bez=zusatzkosten_bezeichnung,  # Kommentar: Zusatzkosten Name
                     zus_betrag=zusatzkosten_betrag,  # Kommentar: Zusatzkosten Betrag
                 )  # Kommentar: Ende call
+
             with open(docx_pfad, "rb") as f:  # Kommentar: DOCX lesen
                 docx_bytes = f.read()  # Kommentar: Bytes lesen
 
@@ -305,6 +417,9 @@ if st.session_state.get("analysis_ready"):  # Kommentar: Wenn Analyse vorhanden
         except Exception as e:  # Kommentar: Fehlerfall
             st.error(f"Fehler beim Erzeugen: {e}")  # Kommentar: Anzeige
 
+# ==========================
+# Debug: Dateien
+# ==========================
 with st.expander("Debug: Dateien im System anzeigen"):  # Kommentar: Debug Bereich
     st.subheader("Eingang Gutachten")  # Kommentar: Untertitel
     st.write(os.listdir(EINGANGS_ORDNER))  # Kommentar: Liste anzeigen
@@ -312,3 +427,4 @@ with st.expander("Debug: Dateien im System anzeigen"):  # Kommentar: Debug Berei
     st.write(os.listdir(KI_ANTWORT_ORDNER))  # Kommentar: Liste anzeigen
     st.subheader("Ausgang-Schreiben")  # Kommentar: Untertitel
     st.write(os.listdir(AUSGANGS_ORDNER))  # Kommentar: Liste anzeigen
+
