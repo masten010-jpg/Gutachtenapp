@@ -86,7 +86,33 @@ BESONDERS WICHTIGE FELDER:  # Kommentar: Fokusfelder
 - UNFALL_DATUM, UNFALL_UHRZEIT, UNFALLORT, UNFALL_STRASSE  # Kommentar: Fokus
 - POLIZEIAKTE_NUMMER  # Kommentar: Fokus
 - SCHADENSNUMMER (Priorität: echte Schadensnummer > VS-Nr)  # Kommentar: Fokus
-- SCHADENHERGANG (Original-Abschnitt unter passender Überschrift)  # Kommentar: Fokus
+- SCHADENHERGANG 4. SCHADENHERGANG (SEHR WICHTIG – KEIN MINI-SATZ)
+
+ZIEL:
+- "SCHADENHERGANG" muss entweder
+  (A) ein TEXTTREUER Auszug aus dem Gutachten sein (verbatim/Originalwortlaut)
+  oder (B) "" (leer).
+- Es ist VERBOTEN, einen generischen Ein-Satz-Text zu schreiben wie
+  "Der Unfall ereignete sich am ... in ...". Solche Mini-Sätze sind UNGÜLTIG.
+
+SUCHLOGIK:
+- Finde den passenden Abschnitt anhand einer Überschrift oder nahe verwandten Bezeichnung:
+  "Schadenhergang", "Schadenshergang", "Unfallhergang", "Sachverhalt",
+  "Unfallschilderung", "Hergang", "Unfallbeschreibung".
+- Wenn die Überschrift nicht exakt ist, nimm die NÄCHSTBESTE sehr ähnliche Überschrift.
+
+EXTRAKTION (WICHTIG):
+- Wenn du einen Abschnitt gefunden hast:
+  1) Kopiere den Text direkt unter der Überschrift WÖRTLICH (Originalwortlaut).
+  2) Keine Umformulierung, keine Zusammenfassung, keine Ergänzung.
+  3) Stoppe beim nächsten klaren Kapitel/Überschrift/Tabellenkopf/Themenwechsel.
+  4) Länge: gib 400 bis 1500 Zeichen zurück (wenn mehr vorhanden, kürze am Ende).
+- Wenn du KEINEN Abschnitt findest oder nur sehr wenig Text (unter 250 Zeichen):
+  -> SCHADENHERGANG = "".
+
+VALIDIERUNG:
+- SCHADENHERGANG muss mindestens 250 Zeichen haben ODER leer sein.
+- SCHADENHERGANG muss mindestens 1 vollständigen Satz enthalten, der direkt aus dem Gutachten stammt.  # Kommentar: Fokus
 
 KOSTENFELDER (sofern eindeutig vorhanden):  # Kommentar: Kostenfelder
 - REPARATURKOSTEN  # Kommentar: Feld
