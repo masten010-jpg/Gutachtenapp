@@ -142,7 +142,7 @@ def summe_tabelle_berechnen(  # Kommentar: Summen je Variante (entscheidet, was 
     if variant == "FIKTIV_REPARATUR":  # Kommentar: fiktiv Reparaturschaden -> ohne MwSt
         return reparatur + wertminderung + nutzung + kostenpausch + gutachter + zusatz  # Kommentar: addieren
     if variant == "KONKRET_UNTER_WBW":  # Kommentar: konkret < WBW -> MwSt wird addiert (wenn nicht geleert)
-        return reparatur + mwst + wertminderung + nutzung + kostenpausch + gutachter + zusatz  # Kommentar: addieren
+        return reparatur + wertminderung + nutzung + kostenpausch + gutachter + zusatz  # Kommentar: addieren , reperatur (brutto)
     if variant == "REGEL_130":  # Kommentar: 130% -> Wertminderung ausgeschlossen
         return reparatur + mwst + nutzung + kostenpausch + gutachter + zusatz  # Kommentar: addieren
     if variant == "TOTAL_FIKTIV":  # Kommentar: Totalschaden fiktiv -> WBA statt Reparatur, ohne MwSt
@@ -306,3 +306,4 @@ def main(pfad_ki_txt: str = None, vorlage_pfad: str | None = None, auswahl: str 
 
 if __name__ == "__main__":  # Kommentar: Direktstart
     main()  # Kommentar: aufrufen
+
