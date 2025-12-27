@@ -124,6 +124,26 @@ KOSTENFELDER (sofern eindeutig vorhanden):  # Kommentar: Kostenfelder
 - WIEDERBESCHAFFUNGSWERT  # Kommentar: Feld
 - RESTWERT  # Kommentar: Feld
 
+NUTZUNGSAUSFALL (PFLICHTREGEL – NUR EURO-GESAMTBETRAG ODER LEER):
+- Das Feld "NUTZUNGSAUSFALL" muss entweder
+  (A) ein Euro-Gesamtbetrag sein, z.B. "145,00 €" oder "1.234,56 €",
+  oder (B) "" (leer).
+- VERBOTEN: Nutzungsausfallgruppe ohne Betrag (z.B. "Gruppe F"), reine Textangaben, Tagessatz ohne Tage, Tage ohne Tagessatz.
+
+EXTRAKTIONSLOGIK:
+1) Wenn im Gutachten ein Gesamtbetrag eindeutig genannt ist (z.B. "Nutzungsausfall: 145,00 €"):
+   -> Übernimm diesen Betrag exakt (inkl. Komma/Punkt und € wenn vorhanden; falls € fehlt, hänge " €" an).
+2) Wenn KEIN Gesamtbetrag genannt ist, aber Tagessatz UND Anzahl Tage eindeutig genannt sind:
+   -> Berechne: Gesamtbetrag = Tagessatz * Tage
+   -> Gib das Ergebnis im deutschen Format "1.234,56 €" aus.
+   -> Nutze nur Werte, die eindeutig im Text stehen.
+3) Wenn nur Nutzungsausfallgruppe oder unvollständige Angaben vorhanden sind:
+   -> Setze "NUTZUNGSAUSFALL" auf "".
+
+BELEGREGEL (gegen Halluzination):
+- Wenn du berechnest, müssen sowohl Tagessatz als auch Tage im Text vorhanden sein.
+- Wenn eines fehlt oder unklar ist: "".
+
 AUSGABE:  # Kommentar: Ausgabeanforderung
 1) Stichpunkte (lesbar)  # Kommentar: Teil 1
 2) JSON zwischen JSON_START und JSON_END (nur gültiges JSON)  # Kommentar: Teil 2
