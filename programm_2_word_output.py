@@ -85,7 +85,9 @@ def daten_defaults(daten: dict) -> dict:  # Kommentar: Defaults für alle bekann
         "UNFALL_DATUM", "UNFALL_UHRZEIT", "UNFALLORT", "UNFALL_STRASSE",  # Kommentar: Unfall
         "FAHRZEUGTYP", "KENNZEICHEN", "FAHRZEUG_KENNZEICHEN",  # Kommentar: Fahrzeug
         "POLIZEIAKTE_NUMMER", "SCHADENSNUMMER", "AKTENZEICHEN",  # Kommentar: Nummern
-        "SCHADENHERGANG",  # Kommentar: Hergang
+        "SCHADENHERGANG", # In die keys-Liste aufnehmen.  # Kommentar
+        "LEERSTELLE",  # Kommentar: Platzhalter soll leer gerendert werden
+  # Kommentar: Hergang
         "DEBUG_PROGRAMM2_VERSION", "DEBUG_SUMME_TEILE",  # Kommentar: Debug
     ]  # Kommentar: Ende Keys
     for k in keys:  # Kommentar: iterieren
@@ -204,7 +206,9 @@ def erzwinge_schrift(docx_pfad: str, font_name: str = "Arial MT Pro", font_size_
 
 
 def prepare_data_for_template(daten: dict, auswahl: str, steuerstatus: str, zus_bez: str = "", zus_betrag: str = "") -> dict:  # Kommentar: Public Funktion – bereitet Daten inkl. Summe vor
-    daten = daten_defaults(daten)  # Kommentar: Defaults setzen
+    daten = daten_defaults(daten) # Kommentar: Defaults setzen
+    
+    daten["LEERSTELLE"] = ""  # ersetzen durch freistelle
     daten["ABRECHNUNGSART"] = auswahl  # Kommentar: Auswahl speichern
     daten["ZUSATZKOSTEN_BEZEICHNUNG"] = (zus_bez or "").strip()  # Kommentar: Zusatzbezeichnung
     daten["ZUSATZKOSTEN_BETRAG"] = (zus_betrag or "").strip()  # Kommentar: Zusatzbetrag
@@ -306,4 +310,5 @@ def main(pfad_ki_txt: str = None, vorlage_pfad: str | None = None, auswahl: str 
 
 if __name__ == "__main__":  # Kommentar: Direktstart
     main()  # Kommentar: aufrufen
+
 
