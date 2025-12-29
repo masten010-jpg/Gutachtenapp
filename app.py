@@ -171,7 +171,7 @@ VORLAGEN = {  # Kommentar: Deine 6 Varianten
     "130%-Regelung": "vorlage_130_prozent.docx",  # Kommentar: Variante 3
     "Totalschaden fiktiv": "vorlage_totalschaden_fiktiv.docx",  # Kommentar: Variante 4
     "Totalschaden konkret": "vorlage_totalschaden_konkret.docx",  # Kommentar: Variante 5
-    "Totalschaden Ersatzbeschaffung": "vorlage_schreibentotalschaden.docx",  # Kommentar: Variante 6
+    "Totalschaden Ersatzbeschaffung": "vorlage_schreibentotalschaden.docx"  # Kommentar: Variante 6
 }  # Kommentar: Ende Vorlagen
 
 def resolve_vorlage_pfad(auswahl: str) -> str:  # Kommentar: Auswahl -> Pfad
